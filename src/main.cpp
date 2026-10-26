@@ -36,20 +36,17 @@
 using namespace condor;
 
 int main(int argc, char** argv) {
-    // Early command handler for GNU GPL legal queries ('condor show w' and 'condor show c')
-    if (argc >= 2 && std::string_view(argv[1]) == "show") {
-        if (argc >= 3) {
-            std::string_view sub(argv[2]);
-            if (sub == "w" || sub == "warranty") {
-                RuntimeMenu::print_warranty();
-                return 0;
-            } else if (sub == "c" || sub == "copying" || sub == "conditions") {
-                RuntimeMenu::print_conditions();
-                return 0;
-            }
+    // Early command handler for GNU GPL legal queries ('condor --warranty' and 'condor --license')
+    if (argc >= 2) {
+        std::string_view arg(argv[1]);
+        if (arg == "--warranty" || arg == "warranty" || (arg == "show" && argc >= 3 && std::string_view(argv[2]) == "w")) {
+            RuntimeMenu::print_warranty();
+            return 0;
         }
-        std::cerr << "Usage: condor show w (warranty) or condor show c (redistribution conditions)\n";
-        return 1;
+        if (arg == "--license" || arg == "license" || arg == "--copying" || (arg == "show" && argc >= 3 && std::string_view(argv[2]) == "c")) {
+            RuntimeMenu::print_conditions();
+            return 0;
+        }
     }
 
     CLI::App app{"condor - Modern C++20 Parallel Process and Grid Orchestrator"};
@@ -92,11 +89,11 @@ int main(int argc, char** argv) {
     app.add_flag("--dry-run", dry_run, "Validate stage names, DAG cycles, evaluate conditions, print plan, and exit");
     app.add_flag("--no-interactive", no_interactive, "Disable interactive stdin polling and ANSI progress redraws (CI mode)");
     app.add_flag("--verbose-logging", verbose_logging, "Enable detailed scheduler event logging");
-    app.add_flag_callback("--show-w,--warranty", []() {
+    app.add_flag_callback("--warranty", []() {
         RuntimeMenu::print_warranty();
         std::exit(0);
     }, "Display GNU General Public License warranty disclaimer");
-    app.add_flag_callback("--show-c,--copying", []() {
+    app.add_flag_callback("--license,--copying", []() {
         RuntimeMenu::print_conditions();
         std::exit(0);
     }, "Display GNU General Public License redistribution conditions");

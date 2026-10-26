@@ -192,9 +192,9 @@ TEST_CASE(gpl_interactive_notice) {
     RuntimeMenu::print_notice(oss);
     std::string text = oss.str();
     ASSERT_TRUE(text.find("condor  Copyright (C) 2026  Ezequiel Alves") != std::string::npos);
-    ASSERT_TRUE(text.find("This program comes with ABSOLUTELY NO WARRANTY; for details type `show w'.") != std::string::npos);
+    ASSERT_TRUE(text.find("This program comes with ABSOLUTELY NO WARRANTY; for details type `condor --warranty'.") != std::string::npos);
     ASSERT_TRUE(text.find("This is free software, and you are welcome to redistribute it") != std::string::npos);
-    ASSERT_TRUE(text.find("under certain conditions; type `show c' for details.") != std::string::npos);
+    ASSERT_TRUE(text.find("under certain conditions; type `condor --license' for details.") != std::string::npos);
 }
 
 TEST_CASE(gpl_warranty_text) {

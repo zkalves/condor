@@ -653,13 +653,14 @@ Also add information on how to contact you by electronic and paper mail.
 notice like this when it starts in an interactive mode:
 
     condor  Copyright (C) 2026  Ezequiel Alves
-    This program comes with ABSOLUTELY NO WARRANTY; for details type `show w'.
+    This program comes with ABSOLUTELY NO WARRANTY; for details type `condor --warranty'.
     This is free software, and you are welcome to redistribute it
-    under certain conditions; type `show c' for details.
+    under certain conditions; type `condor --license' for details.
 
-The hypothetical commands `show w' and `show c' should show the appropriate
-parts of the General Public License.  Of course, your program's commands
-might be different; for a GUI interface, you would use an "about box".
+The commands `condor --warranty' and `condor --license' (or `w' and `l' in the
+interactive runtime menu) show the appropriate parts of the General Public License.
+Of course, your program's commands might be different; for a GUI interface, you
+would use an "about box".
 
   You should also get your employer (if you work as a programmer) or school,
 if any, to sign a "copyright disclaimer" for the program, if necessary.

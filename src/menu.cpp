@@ -119,9 +119,9 @@ void RuntimeMenu::poll_stdin_for_menu() {
 
 void RuntimeMenu::print_notice(std::ostream& os) {
     os << "condor  Copyright (C) 2026  Ezequiel Alves\n"
-       << "This program comes with ABSOLUTELY NO WARRANTY; for details type `show w'.\n"
+       << "This program comes with ABSOLUTELY NO WARRANTY; for details type `condor --warranty'.\n"
        << "This is free software, and you are welcome to redistribute it\n"
-       << "under certain conditions; type `show c' for details.\n";
+       << "under certain conditions; type `condor --license' for details.\n";
 }
 
 void RuntimeMenu::print_warranty(std::ostream& os) {
@@ -219,8 +219,8 @@ void RuntimeMenu::print_help() {
               << " [p]        Pause / Resume: Toggle dispatching new jobs\n"
               << " [k <id>]   Kill Job: Terminate active job by job_id\n"
               << " [j <N>]    Scale Slots: Adjust maximum concurrent jobs\n"
-              << " [show w]   Warranty: Display GNU GPL warranty disclaimer\n"
-              << " [show c]   Copying: Display GNU GPL redistribution conditions\n"
+              << " [w]        Warranty: Display GNU GPL warranty disclaimer\n"
+              << " [l]        License: Display GNU GPL redistribution conditions\n"
               << " [c]        Continue: Resume live progress display\n"
               << " [q]        Quit / Abort All: Terminate all jobs & exit\n"
               << div << "\n"
@@ -237,20 +237,12 @@ void RuntimeMenu::run_menu(Scheduler& scheduler) {
         std::string cmd;
         iss >> cmd;
 
-        if (cmd == "show") {
-            std::string sub;
-            iss >> sub;
-            if (sub == "w" || sub == "warranty") {
-                print_warranty();
-            } else if (sub == "c" || sub == "copying" || sub == "conditions") {
-                print_conditions();
-            } else {
-                std::cout << "Usage: show w (warranty) or show c (redistribution conditions)\n";
-            }
+        if (cmd == "w" || cmd == "warranty" || (cmd == "show" && line.find('w') != std::string::npos)) {
+            print_warranty();
             std::cout << "Enter command (or 'c' to continue): " << std::flush;
             continue;
-        } else if (cmd == "w" || cmd == "warranty") {
-            print_warranty();
+        } else if (cmd == "l" || cmd == "license" || cmd == "copying" || (cmd == "show" && line.find('c') != std::string::npos)) {
+            print_conditions();
             std::cout << "Enter command (or 'c' to continue): " << std::flush;
             continue;
         } else if (cmd == "s" || cmd == "status") {
