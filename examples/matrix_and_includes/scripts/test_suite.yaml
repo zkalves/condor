@@ -1,0 +1,21 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+# Reusable Test Suite included into matrix_and_includes pipeline
+defaults:
+  variables:
+    ITERATIONS: "5000"
+
+jobs:
+  - name: boundary_test
+    seed: 999
+  - name: fuzz_sweep
+    seeds: [101, 202, 303, 404]
+  - name: memory_leak_check
+    seed: 1234

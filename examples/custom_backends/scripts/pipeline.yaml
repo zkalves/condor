@@ -1,0 +1,56 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+name: custom_backends_pipeline
+
+variables:
+  cluster_queue: "batch_standard"
+
+settings:
+  max_parallel_jobs: 4
+  base_output_dir: "./condor_runs"
+  default_backend: "local"
+
+# Define custom template backends (e.g. Slurm, SGE, LSF, or container orchestrators)
+backends:
+  grid_cluster:
+    type: template
+    submit_command: "bash ${CONDOR_PIPELINE_DIR}/mock_grid_submit.sh {script} {job_id}"
+    poll_command: "bash ${CONDOR_PIPELINE_DIR}/mock_grid_poll.sh {grid_id}"
+    cancel_command: "bash ${CONDOR_PIPELINE_DIR}/mock_grid_cancel.sh {grid_id}"
+
+stages:
+  # Stage 1 runs on the default 'local' backend
+  - name: prepare
+    jobs:
+      - name: setup_environment
+        command: "echo '[LOCAL] Initializing workspace and configuration...'"
+      - name: stage_inputs
+        command: "echo '[LOCAL] Staging input data matrices...'"
+
+  # Stage 2 assigns grid_cluster backend at the stage level
+  - name: distributed_compute
+    depends_on: [prepare]
+    backend: grid_cluster
+    defaults:
+      command: "bash ${CONDOR_PIPELINE_DIR}/workload.sh"
+    jobs:
+      - name: matrix_partition_0
+        depends_on: ["prepare/0002"]       # Job-level dependency on stage_inputs
+      - name: matrix_partition_1
+        depends_on: ["prepare/0002"]
+      # Job-level backend override: run this specific job locally
+      - name: local_sanity_probe
+        backend: local
+        command: "echo '[LOCAL OVERRIDE] Performing fast sanity check on local worker slot...'"
+
+  # Stage 3 aggregates results locally
+  - name: finalize
+    depends_on: [distributed_compute]
+    command: "echo '[LOCAL] All grid cluster tasks successfully completed. Pipeline finalized.'"

@@ -1,0 +1,971 @@
+/**
+ * Solarized Theme for Doxygen (Customized for rmap)
+ * Based on Ethan Schoonover's precision 16-color Solarized palette.
+ * Default: Solarized Dark (#002b36).
+ * Seamlessly toggles to Solarized Light (#fdf6e3).
+ */
+
+/* ==========================================================================
+   1. Solarized Base 16-Color Palette Tokens
+   ========================================================================== */
+:root {
+    /* Eight Monotones */
+    --sol-base03:  #002b36; /* Dark background */
+    --sol-base02:  #073642; /* Dark highlights / cards / panels */
+    --sol-base01:  #586e75; /* Comments / secondary text */
+    --sol-base00:  #657b83; /* Muted text */
+    --sol-base0:   #839496; /* Dark body text */
+    --sol-base1:   #93a1a1; /* Light headings / comments */
+    --sol-base2:   #eee8d5; /* Light highlights / cards */
+    --sol-base3:   #fdf6e3; /* Light background */
+
+    /* Eight Accents */
+    --sol-yellow:  #b58900;
+    --sol-orange:  #cb4b16;
+    --sol-red:     #dc322f;
+    --sol-magenta: #d33682;
+    --sol-violet:  #6c71c4;
+    --sol-blue:    #268bd2;
+    --sol-cyan:    #2aa198;
+    --sol-green:   #859900;
+
+    /* Fonts & Metrics */
+    --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-monospace: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --font-size: 15px;
+    --line-height: 1.6;
+}
+
+/* ==========================================================================
+   2. Solarized Dark Theme (Default for rmap)
+   ========================================================================== */
+:root,
+html,
+body,
+html:not(.light-mode),
+html.dark-mode {
+    color-scheme: dark;
+
+    /* Semantic Mappings */
+    --primary-color: var(--sol-blue);
+    --primary-dark-color: #1e70a9;
+    --primary-light-color: #0e3c54;
+    --primary-lighter-color: rgba(38, 139, 210, 0.15);
+
+    --accent-color: var(--sol-cyan);
+    --accent-dark-color: #20827a;
+
+    --page-background-color: var(--sol-base03);
+    --page-foreground-color: var(--sol-base0);
+    --page-secondary-foreground-color: var(--sol-base01);
+    --page-heading-color: var(--sol-cyan);
+
+    --page-link-color: var(--sol-blue);
+    --page-link-hover-color: var(--sol-cyan);
+    --page-visited-link-color: var(--sol-violet);
+
+    --side-nav-background: var(--sol-base02);
+    --side-nav-foreground: var(--sol-base0);
+    --side-nav-hover-background: #0b3d4b;
+    --side-nav-active-background: var(--sol-base03);
+    --side-nav-active-foreground: var(--sol-cyan);
+
+    --border-color: #0b3d4b;
+    --separator-color: #0b3d4b;
+    --border-subtle: #073642;
+
+    --card-background: var(--sol-base02);
+    --card-header-background: #00212b;
+    --card-header-foreground: var(--sol-cyan);
+
+    --code-background: #00212b;
+    --code-foreground: var(--sol-base0);
+    --code-border: #0b3d4b;
+
+    --table-header-background: var(--sol-base02);
+    --table-header-foreground: var(--sol-base1);
+    --table-alt-row-background: #052c36;
+    --table-hover-row-background: #0b3d4b;
+
+    --selection-background: #0b3d4b;
+    --selection-foreground: var(--sol-base3);
+
+    --search-background: var(--sol-base02);
+    --search-foreground: var(--sol-base0);
+    --search-border: #0b3d4b;
+
+    /* Doxygen 1.9+ Internal Variables Override (Dark) */
+    --header-background-color: var(--sol-base03);
+    --header-separator-color: var(--border-color);
+    --header-gradient-image: none;
+
+    --title-background-color: var(--sol-base03);
+    --title-separator-color: var(--border-color);
+
+    --nav-background-color: var(--sol-base02);
+    --nav-foreground-color: var(--sol-base0);
+    --nav-gradient-image: none;
+    --nav-gradient-hover-image: none;
+    --nav-gradient-active-image: none;
+    --nav-separator-image: none;
+    --nav-breadcrumb-image: none;
+    --nav-splitbar-image: none;
+
+    --nav-text-normal-color: var(--sol-base0);
+    --nav-text-hover-color: var(--sol-cyan);
+    --nav-text-active-color: var(--sol-blue);
+    --nav-menu-button-color: var(--sol-base0);
+    --nav-menu-background-color: var(--sol-base02);
+    --nav-menu-foreground-color: var(--sol-base0);
+    --nav-arrow-color: var(--sol-base01);
+    --nav-arrow-selected-color: var(--sol-cyan);
+
+    --memdecl-background-color: var(--sol-base02);
+    --memdecl-separator-color: var(--border-color);
+    --memdecl-foreground-color: var(--sol-base0);
+
+    --memdef-border-color: var(--border-color);
+    --memdef-title-background-color: #00212b;
+    --memdef-title-gradient-image: none;
+    --memdef-proto-background-color: var(--sol-base02);
+    --memdef-proto-text-color: var(--sol-cyan);
+    --memdef-doc-background-color: var(--sol-base03);
+    --memdef-param-name-color: var(--sol-orange);
+    --memdef-template-color: var(--sol-violet);
+
+    --table-header-background-color: var(--sol-base02);
+    --table-header-foreground-color: var(--sol-base1);
+    --table-cell-border-color: var(--border-color);
+
+    --search-background-color: var(--sol-base02);
+    --search-foreground-color: var(--sol-base0);
+    --search-filter-background-color: var(--sol-base02);
+    --search-results-background-color: var(--sol-base03);
+    --search-results-foreground-color: var(--sol-base0);
+    --search-results-border-color: var(--border-color);
+
+    --code-keyword-color: var(--sol-green);
+    --code-type-keyword-color: var(--sol-yellow);
+    --code-flow-keyword-color: var(--sol-green);
+    --code-comment-color: var(--sol-base01);
+    --code-preprocessor-color: var(--sol-orange);
+    --code-string-literal-color: var(--sol-cyan);
+    --code-char-literal-color: var(--sol-cyan);
+    --code-link-color: var(--sol-blue);
+
+    --fragment-foreground-color: var(--sol-base0);
+    --fragment-background-color: #00212b;
+    --fragment-border-color: var(--border-color);
+    --fragment-lineno-border-color: var(--border-color);
+    --fragment-lineno-background-color: #00212b;
+    --fragment-lineno-foreground-color: var(--sol-base01);
+
+    --footer-foreground-color: var(--sol-base01);
+    --glow-color: var(--sol-cyan);
+}
+
+/* ==========================================================================
+   3. Solarized Light Theme (Active on .light-mode)
+   ========================================================================== */
+html.light-mode {
+    color-scheme: light;
+
+    /* Semantic Mappings */
+    --primary-color: var(--sol-blue);
+    --primary-dark-color: #1a6da8;
+    --primary-light-color: #bbdefb;
+    --primary-lighter-color: rgba(38, 139, 210, 0.12);
+
+    --accent-color: var(--sol-cyan);
+    --accent-dark-color: #1e7871;
+
+    --page-background-color: var(--sol-base3);
+    --page-foreground-color: var(--sol-base00);
+    --page-secondary-foreground-color: var(--sol-base1);
+    --page-heading-color: var(--sol-blue);
+
+    --page-link-color: var(--sol-blue);
+    --page-link-hover-color: var(--sol-cyan);
+    --page-visited-link-color: var(--sol-violet);
+
+    --side-nav-background: var(--sol-base2);
+    --side-nav-foreground: var(--sol-base00);
+    --side-nav-hover-background: #e4dcc4;
+    --side-nav-active-background: var(--sol-base3);
+    --side-nav-active-foreground: var(--sol-blue);
+
+    --border-color: #d3cbb7;
+    --separator-color: #d3cbb7;
+    --border-subtle: #eee8d5;
+
+    --card-background: var(--sol-base2);
+    --card-header-background: #e4dcc4;
+    --card-header-foreground: var(--sol-blue);
+
+    --code-background: var(--sol-base2);
+    --code-foreground: var(--sol-base01);
+    --code-border: #d3cbb7;
+
+    --table-header-background: var(--sol-base2);
+    --table-header-foreground: var(--sol-base01);
+    --table-alt-row-background: #f7f1dd;
+    --table-hover-row-background: #e4dcc4;
+
+    --selection-background: var(--sol-blue);
+    --selection-foreground: var(--sol-base3);
+
+    --search-background: #ffffff;
+    --search-foreground: var(--sol-base00);
+    --search-border: #d3cbb7;
+
+    /* Doxygen 1.9+ Internal Variables Override (Light) */
+    --header-background-color: var(--sol-base3);
+    --header-separator-color: var(--border-color);
+    --header-gradient-image: none;
+
+    --title-background-color: var(--sol-base3);
+    --title-separator-color: var(--border-color);
+
+    --nav-background-color: var(--sol-base2);
+    --nav-foreground-color: var(--sol-base00);
+    --nav-gradient-image: none;
+    --nav-gradient-hover-image: none;
+    --nav-gradient-active-image: none;
+    --nav-separator-image: none;
+    --nav-breadcrumb-image: none;
+    --nav-splitbar-image: none;
+
+    --nav-text-normal-color: var(--sol-base00);
+    --nav-text-hover-color: var(--sol-blue);
+    --nav-text-active-color: var(--sol-cyan);
+    --nav-menu-button-color: var(--sol-base00);
+    --nav-menu-background-color: var(--sol-base2);
+    --nav-menu-foreground-color: var(--sol-base00);
+    --nav-arrow-color: var(--sol-base1);
+    --nav-arrow-selected-color: var(--sol-blue);
+
+    --memdecl-background-color: var(--sol-base2);
+    --memdecl-separator-color: var(--border-color);
+    --memdecl-foreground-color: var(--sol-base00);
+
+    --memdef-border-color: var(--border-color);
+    --memdef-title-background-color: #e4dcc4;
+    --memdef-title-gradient-image: none;
+    --memdef-proto-background-color: var(--sol-base2);
+    --memdef-proto-text-color: var(--sol-blue);
+    --memdef-doc-background-color: var(--sol-base3);
+    --memdef-param-name-color: var(--sol-orange);
+    --memdef-template-color: var(--sol-violet);
+
+    --table-header-background-color: var(--sol-base2);
+    --table-header-foreground-color: var(--sol-base01);
+    --table-cell-border-color: var(--border-color);
+
+    --search-background-color: #ffffff;
+    --search-foreground-color: var(--sol-base00);
+    --search-filter-background-color: var(--sol-base2);
+    --search-results-background-color: var(--sol-base3);
+    --search-results-foreground-color: var(--sol-base00);
+    --search-results-border-color: var(--border-color);
+
+    --code-keyword-color: var(--sol-green);
+    --code-type-keyword-color: var(--sol-yellow);
+    --code-flow-keyword-color: var(--sol-green);
+    --code-comment-color: var(--sol-base1);
+    --code-preprocessor-color: var(--sol-orange);
+    --code-string-literal-color: var(--sol-cyan);
+    --code-char-literal-color: var(--sol-cyan);
+    --code-link-color: var(--sol-blue);
+
+    --fragment-foreground-color: var(--sol-base01);
+    --fragment-background-color: var(--sol-base2);
+    --fragment-border-color: var(--border-color);
+    --fragment-lineno-border-color: var(--border-color);
+    --fragment-lineno-background-color: var(--sol-base2);
+    --fragment-lineno-foreground-color: var(--sol-base1);
+
+    --footer-foreground-color: var(--sol-base1);
+    --glow-color: var(--sol-blue);
+}
+
+/* ==========================================================================
+   4. Universal Annihilation of Legacy Doxygen Bitmap Gradients
+   ========================================================================== */
+#top,
+#titlearea,
+#nav-tree,
+#nav-tree *,
+#nav-tree .selected,
+#nav-tree-contents,
+.sm-dox,
+.sm-dox *,
+.sm-dox a,
+.sm-dox a:hover,
+.sm-dox a:focus,
+.sm-dox ul,
+.sm-dox ul a,
+.tabs,
+.tabs2,
+.tabs3,
+.tablist,
+.tablist *,
+#navrow1,
+#navrow2,
+#navrow3,
+.navpath,
+.navpath *,
+#nav-path,
+#nav-path *,
+.header,
+.headertitle,
+.memdoc,
+.memproto,
+.memitem,
+.fieldtable th,
+#splitbar {
+    background-image: none !important;
+}
+
+/* ==========================================================================
+   5. Base Structure & Global Typography
+   ========================================================================== */
+html, body {
+    background-color: var(--page-background-color) !important;
+    color: var(--page-foreground-color) !important;
+    font-family: var(--font-family) !important;
+    font-size: var(--font-size);
+    line-height: var(--line-height);
+    margin: 0;
+    padding: 0;
+}
+
+p, dl, ul, ol {
+    color: var(--page-foreground-color) !important;
+    line-height: var(--line-height);
+}
+
+::selection {
+    background-color: var(--selection-background) !important;
+    color: var(--selection-foreground) !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-family) !important;
+    font-weight: 600;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+h1 {
+    font-size: 2rem;
+    color: var(--sol-cyan) !important;
+    border-bottom: 2px solid var(--border-color) !important;
+    padding-bottom: 0.35em;
+}
+
+h2 {
+    font-size: 1.45rem;
+    color: var(--sol-blue) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    padding-bottom: 0.25em;
+}
+
+h3 {
+    font-size: 1.2rem;
+    color: var(--sol-yellow) !important;
+}
+
+h4 {
+    font-size: 1.05rem;
+    color: var(--sol-green) !important;
+}
+
+a, a:visited {
+    color: var(--page-link-color) !important;
+    text-decoration: none;
+    transition: color 0.15s ease-in-out;
+}
+
+a:hover, a:focus {
+    color: var(--page-link-hover-color) !important;
+    text-decoration: underline;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 2em 0;
+}
+
+/* ==========================================================================
+   6. Top Header & Title Area
+   ========================================================================== */
+#top {
+    background-color: var(--header-background-color) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+}
+
+#titlearea {
+    background-color: var(--header-background-color) !important;
+    border-bottom: none !important;
+    padding: 14px 24px;
+}
+
+#titlearea table {
+    background: transparent !important;
+}
+
+#projectlogo {
+    vertical-align: middle;
+    padding-right: 14px;
+}
+
+#projectlogo img {
+    max-height: 48px;
+    width: auto;
+    vertical-align: middle;
+}
+
+#projectname {
+    font-size: 1.85rem !important;
+    font-weight: 700 !important;
+    color: var(--sol-cyan) !important;
+    display: inline-flex;
+    align-items: center;
+}
+
+#projectbrief {
+    font-size: 0.95rem !important;
+    color: var(--page-secondary-foreground-color) !important;
+    margin-top: 4px;
+}
+
+#projectnumber {
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    color: var(--sol-blue) !important;
+    background: var(--primary-lighter-color) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 9999px !important;
+    padding: 2px 10px !important;
+    margin-left: 10px;
+    vertical-align: middle;
+}
+
+/* ==========================================================================
+   7. Top Menu & SmartMenus (.sm-dox)
+   ========================================================================== */
+.sm-dox {
+    background-color: var(--side-nav-background) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    padding: 0 16px !important;
+    line-height: 38px !important;
+}
+
+.sm-dox a, .sm-dox a:focus, .sm-dox a:active {
+    font-family: var(--font-family) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: var(--nav-text-normal-color) !important;
+    text-shadow: none !important;
+    border: none !important;
+    padding: 0 14px !important;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sm-dox a:hover {
+    background-color: var(--side-nav-hover-background) !important;
+    color: var(--nav-text-hover-color) !important;
+    text-shadow: none !important;
+}
+
+.sm-dox a.current {
+    color: var(--primary-color) !important;
+    border-bottom: 2px solid var(--primary-color) !important;
+}
+
+.sm-dox ul {
+    background-color: var(--side-nav-background) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 6px !important;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4) !important;
+    padding: 6px 0 !important;
+}
+
+.sm-dox ul a, .sm-dox ul a:focus, .sm-dox ul a:active {
+    background-color: transparent !important;
+    color: var(--nav-menu-foreground-color) !important;
+    text-shadow: none !important;
+    padding: 6px 16px !important;
+    font-size: 13px !important;
+}
+
+.sm-dox ul a:hover {
+    background-color: var(--side-nav-hover-background) !important;
+    color: var(--nav-text-hover-color) !important;
+    text-shadow: none !important;
+}
+
+/* Fallback for static tabs */
+#navrow1, #navrow2, #navrow3, .tabs, .tabs2, .tabs3 {
+    background-color: var(--side-nav-background) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+}
+
+.tablist {
+    display: flex;
+    flex-wrap: wrap;
+    padding: 0 16px !important;
+    border-bottom: none !important;
+}
+
+.tablist li {
+    margin: 0 4px !important;
+}
+
+.tablist a {
+    color: var(--nav-text-normal-color) !important;
+    font-weight: 500 !important;
+    padding: 8px 14px !important;
+    text-shadow: none !important;
+    border-radius: 4px 4px 0 0;
+}
+
+.tablist a:hover {
+    color: var(--nav-text-hover-color) !important;
+    background-color: var(--side-nav-hover-background) !important;
+    text-decoration: none !important;
+}
+
+.tablist li.current a {
+    color: var(--primary-color) !important;
+    border-bottom: 2px solid var(--primary-color) !important;
+    background-color: var(--primary-lighter-color) !important;
+}
+
+/* ==========================================================================
+   8. Navigation Tree Sidebar (#nav-tree)
+   ========================================================================== */
+#side-nav {
+    background-color: var(--side-nav-background) !important;
+}
+
+#nav-tree {
+    background-color: var(--side-nav-background) !important;
+    border-right: 1px solid var(--border-color) !important;
+}
+
+#nav-tree-contents {
+    background-color: var(--side-nav-background) !important;
+    padding: 10px 4px;
+}
+
+#nav-tree ul {
+    background: transparent !important;
+}
+
+#nav-tree li {
+    color: var(--side-nav-foreground) !important;
+}
+
+#nav-tree .item {
+    font-family: var(--font-family) !important;
+    font-size: 0.9rem;
+    color: var(--side-nav-foreground) !important;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+#nav-tree .item:hover {
+    background-color: var(--side-nav-hover-background) !important;
+    color: var(--nav-text-hover-color) !important;
+}
+
+#nav-tree .selected {
+    background-color: var(--side-nav-active-background) !important;
+    color: var(--side-nav-active-foreground) !important;
+    font-weight: 600 !important;
+    text-shadow: none !important;
+    border-left: 3px solid var(--sol-cyan) !important;
+    border-radius: 0 4px 4px 0;
+}
+
+#nav-tree .selected a {
+    color: var(--side-nav-active-foreground) !important;
+    text-decoration: none !important;
+}
+
+#nav-tree a {
+    color: var(--side-nav-foreground) !important;
+    text-decoration: none !important;
+}
+
+#nav-tree a:hover {
+    color: var(--nav-text-hover-color) !important;
+}
+
+#splitbar {
+    background-color: var(--border-color) !important;
+    width: 4px !important;
+}
+
+/* ==========================================================================
+   9. Main Document Content (#doc-content)
+   ========================================================================== */
+#doc-content {
+    background-color: var(--page-background-color) !important;
+    color: var(--page-foreground-color) !important;
+}
+
+.contents {
+    background-color: var(--page-background-color) !important;
+    color: var(--page-foreground-color) !important;
+    padding: 24px 36px;
+    max-width: 1280px;
+}
+
+.header {
+    background-color: var(--page-background-color) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    padding: 16px 36px 12px;
+}
+
+.headertitle .title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--sol-cyan) !important;
+}
+
+.summary {
+    color: var(--page-secondary-foreground-color) !important;
+    font-size: 0.9rem;
+    margin-top: 6px;
+}
+
+.summary a {
+    color: var(--sol-blue) !important;
+}
+
+.summary a:hover {
+    color: var(--sol-cyan) !important;
+}
+
+/* ==========================================================================
+   10. Code Blocks & Syntax Highlighting
+   ========================================================================== */
+code, tt {
+    font-family: var(--font-monospace) !important;
+    font-size: 0.88em;
+    background-color: var(--code-background) !important;
+    color: var(--sol-cyan) !important;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--code-border) !important;
+}
+
+pre, div.fragment {
+    background-color: var(--code-background) !important;
+    border: 1px solid var(--code-border) !important;
+    color: var(--code-foreground) !important;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 1.25em 0;
+    overflow-x: auto;
+    font-family: var(--font-monospace) !important;
+    font-size: 0.88rem;
+    line-height: 1.55;
+}
+
+div.fragment span {
+    font-family: var(--font-monospace) !important;
+}
+
+.lineno {
+    color: var(--page-secondary-foreground-color) !important;
+    background-color: transparent !important;
+    user-select: none;
+    border-right: 1px solid var(--code-border) !important;
+    padding-right: 12px !important;
+    margin-right: 12px !important;
+}
+
+/* Solarized Token Classes */
+.comment { color: var(--sol-base01) !important; font-style: italic; }
+.keyword, .keywordflow { color: var(--sol-green) !important; font-weight: 600; }
+.keywordtype { color: var(--sol-yellow) !important; font-weight: 600; }
+.preprocessor { color: var(--sol-orange) !important; font-weight: 600; }
+.stringliteral, .charliteral { color: var(--sol-cyan) !important; }
+
+/* ==========================================================================
+   11. Tables (Markdown, Class members, File lists)
+   ========================================================================== */
+table.markdownTable,
+table.fieldtable,
+table.doxtable,
+table.directory,
+table.memberdecls {
+    border-collapse: collapse !important;
+    width: 100%;
+    margin: 1.5em 0;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 6px;
+    background-color: var(--page-background-color) !important;
+}
+
+table.markdownTable th,
+table.fieldtable th,
+table.doxtable th,
+table.directory th,
+table.memberdecls tr.heading td {
+    background-color: var(--card-header-background) !important;
+    color: var(--card-header-foreground) !important;
+    font-weight: 600;
+    padding: 10px 14px;
+    border: 1px solid var(--border-color) !important;
+    text-align: left;
+}
+
+table.markdownTable td,
+table.fieldtable td,
+table.doxtable td,
+table.directory td,
+table.memberdecls td {
+    padding: 8px 14px;
+    border: 1px solid var(--border-color) !important;
+    color: var(--page-foreground-color) !important;
+    background-color: transparent !important;
+}
+
+table.markdownTable tr:hover td,
+table.doxtable tr:hover td,
+table.directory tr:hover td,
+table.memberdecls tr:hover td {
+    background-color: var(--side-nav-hover-background) !important;
+}
+
+/* ==========================================================================
+   12. Member Declarations & Detail Cards (.memitem, .memproto, .memdoc)
+   ========================================================================== */
+.memitem {
+    background-color: var(--card-background) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 8px;
+    margin-bottom: 24px;
+    box-shadow: none !important;
+    overflow: hidden;
+}
+
+.memproto {
+    background-color: var(--card-header-background) !important;
+    border: none !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    padding: 12px 18px;
+    font-family: var(--font-monospace) !important;
+    font-size: 0.92rem;
+    color: var(--card-header-foreground) !important;
+    text-shadow: none !important;
+    box-shadow: none !important;
+}
+
+.memproto table td {
+    background: transparent !important;
+    border: none !important;
+    font-family: var(--font-monospace) !important;
+}
+
+.memname {
+    font-weight: 700;
+    color: var(--primary-color) !important;
+}
+
+.paramtype {
+    color: var(--sol-yellow) !important;
+}
+
+.paramname {
+    color: var(--sol-orange) !important;
+    font-style: italic;
+}
+
+.memdoc {
+    padding: 16px 20px;
+    background-color: var(--card-background) !important;
+    color: var(--page-foreground-color) !important;
+    border: none !important;
+}
+
+.permalink a {
+    color: var(--page-secondary-foreground-color) !important;
+    opacity: 0.5;
+}
+
+.permalink a:hover {
+    opacity: 1;
+    color: var(--sol-cyan) !important;
+}
+
+/* ==========================================================================
+   13. Search Box & Search Results
+   ========================================================================== */
+#MSearchBox {
+    background-color: var(--search-background) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+}
+
+#MSearchField {
+    font-family: var(--font-family) !important;
+    font-size: 0.9rem !important;
+    color: var(--search-foreground) !important;
+    background: transparent !important;
+    border: none !important;
+    outline: none !important;
+}
+
+#MSearchField::placeholder {
+    color: var(--page-secondary-foreground-color) !important;
+}
+
+#MSearchSelectWindow,
+#MSearchResultsWindow {
+    background-color: var(--card-background) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+}
+
+.SRPage {
+    background-color: var(--card-background) !important;
+}
+
+.SRResult {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.SRResult:hover {
+    background-color: var(--side-nav-hover-background) !important;
+}
+
+/* ==========================================================================
+   14. Callouts & Admonitions (dl.note, dl.warning, dl.important)
+   ========================================================================== */
+dl.note, dl.warning, dl.attention, dl.important, dl.return, dl.see {
+    border-radius: 6px;
+    padding: 12px 18px;
+    margin: 1.25em 0;
+    border: 1px solid var(--border-color);
+    border-left-width: 5px;
+}
+
+dl.note dt, dl.warning dt, dl.attention dt, dl.important dt {
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+}
+
+dl.note dd, dl.warning dd, dl.attention dd, dl.important dd {
+    margin-left: 0;
+    color: var(--page-foreground-color);
+}
+
+dl.note {
+    border-left-color: var(--sol-blue) !important;
+    background-color: rgba(38, 139, 210, 0.08) !important;
+}
+dl.note dt { color: var(--sol-blue) !important; }
+
+dl.warning, dl.attention {
+    border-left-color: var(--sol-orange) !important;
+    background-color: rgba(203, 75, 22, 0.08) !important;
+}
+dl.warning dt, dl.attention dt { color: var(--sol-orange) !important; }
+
+dl.important {
+    border-left-color: var(--sol-red) !important;
+    background-color: rgba(220, 50, 47, 0.08) !important;
+}
+dl.important dt { color: var(--sol-red) !important; }
+
+dl.return, dl.see {
+    border-left-color: var(--sol-cyan) !important;
+    background-color: rgba(42, 161, 152, 0.08) !important;
+}
+dl.return dt, dl.see dt { color: var(--sol-cyan) !important; }
+
+/* ==========================================================================
+   15. Breadcrumbs & Footer
+   ========================================================================== */
+.navpath ul, #nav-path ul {
+    background-color: var(--side-nav-background) !important;
+    border: none !important;
+    border-top: 1px solid var(--border-color) !important;
+    padding: 6px 16px;
+    margin: 0;
+}
+
+.navpath li, #nav-path li {
+    color: var(--page-secondary-foreground-color) !important;
+    font-size: 0.85rem;
+}
+
+.navpath li.navelem a, #nav-path li.navelem a {
+    color: var(--page-foreground-color) !important;
+    text-shadow: none !important;
+}
+
+.navpath li.navelem a:hover, #nav-path li.navelem a:hover {
+    color: var(--sol-cyan) !important;
+}
+
+hr.footer {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin-top: 48px;
+}
+
+.footer {
+    color: var(--page-secondary-foreground-color) !important;
+    font-size: 0.85rem;
+    padding: 16px 0 24px;
+}
+
+.footer a {
+    color: var(--sol-blue) !important;
+}
+
+.footer a:hover {
+    color: var(--sol-cyan) !important;
+}
+
+/* ==========================================================================
+   16. Dark Mode Toggle Component
+   ========================================================================== */
+dark-mode-toggle {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 6px;
+    padding: 6px;
+    color: var(--page-secondary-foreground-color) !important;
+    background: transparent;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+dark-mode-toggle:hover {
+    color: var(--sol-cyan) !important;
+    background-color: var(--side-nav-hover-background) !important;
+}
+
+dark-mode-toggle svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}

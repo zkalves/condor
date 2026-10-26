@@ -1,0 +1,55 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+name: failure_policies_pipeline
+
+variables:
+  policy: "continue"
+
+settings:
+  max_parallel_jobs: 4
+  base_output_dir: "./condor_runs"
+  on_failure_action: "continue"     # Continue independent DAG branches on failure
+  exit_zero_on_failure: true        # Exit with return code 0 for CI monitoring
+  output_mode: "failures"           # Terminal focus on failed tests
+
+stages:
+  - name: setup
+    command: "bash ${CONDOR_PIPELINE_DIR}/success_job.sh"
+
+  # Stage with allow_failure: true at stage level (jobs can fail without failing the stage)
+  - name: experimental_features
+    depends_on: [setup]
+    allow_failure: true
+    jobs:
+      - name: experimental_algo_a
+        command: "bash ${CONDOR_PIPELINE_DIR}/flaky_job.sh"
+      - name: experimental_algo_b
+        command: "bash ${CONDOR_PIPELINE_DIR}/success_job.sh"
+
+  # Branch A: Critical branch that experiences a failure
+  - name: critical_service
+    depends_on: [setup]
+    hooks:
+      post: "bash ${CONDOR_PIPELINE_DIR}/cleanup.sh"
+      always: true                  # Post hook always runs even on job failure
+    jobs:
+      - name: verify_core
+        command: "bash ${CONDOR_PIPELINE_DIR}/success_job.sh"
+      - name: verify_endpoint
+        command: "bash ${CONDOR_PIPELINE_DIR}/fail_job.sh"
+
+  # Branch B: Independent branch that continues and succeeds because on_failure_action is continue
+  - name: independent_diagnostics
+    depends_on: [setup]
+    jobs:
+      - name: memory_audit
+        command: "bash ${CONDOR_PIPELINE_DIR}/success_job.sh"
+      - name: log_collection
+        command: "bash ${CONDOR_PIPELINE_DIR}/success_job.sh"

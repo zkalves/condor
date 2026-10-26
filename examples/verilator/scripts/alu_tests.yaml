@@ -1,0 +1,31 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+# ==============================================================================
+# Reusable ALU Test Suites
+# Shared across different pipeline configurations (Standard, Coverage, Debug)
+# via: include: "alu_tests.yaml"
+# ==============================================================================
+defaults:
+  command: "${BUILD_DIR}/bin/alu_sim --test=${TEST_NAME} --seed=${SEED} --cycles=100000 --coverage-file=${TEST_DIR}/coverage.dat"
+  variables:
+    SEED: "1337"
+
+jobs:
+  - name: arithmetic
+  - name: logic
+  - name: shift
+  - name: mult
+  - name: overflow
+  - name: zero_flag
+  - name: boundary
+  - name: fuzz
+    seeds: [42, 1337, 2024]
+  - name: comparison
+  - name: pipeline_stress

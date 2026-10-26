@@ -1,0 +1,165 @@
+/**
+ * @file backend.hpp
+ * @brief Execution backends for launching, polling, and canceling jobs (Local POSIX and Template Grid).
+ * @author Ezequiel Alves
+ * @copyright Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#pragma once
+
+#include <string>
+#include <string_view>
+#include <vector>
+#include <memory>
+#include <chrono>
+#include <sys/types.h>
+#include "condor/common.hpp"
+#include "condor/config.hpp"
+
+namespace condor {
+
+/**
+ * @struct JobExecutionContext
+ * @brief Dynamic execution context and filesystem coordinates passed to backends for job invocation.
+ */
+struct JobExecutionContext {
+    std::string job_id;                                           ///< Unique 4-digit job identifier (e.g. "0001").
+    std::string job_name;                                         ///< Descriptive human-readable job name.
+    std::string stage_name;                                       ///< Parent stage identifier.
+    std::string command;                                          ///< Target shell command to run.
+    std::string pre_hook;                                         ///< Optional pre-execution hook script.
+    std::string post_hook;                                        ///< Optional post-execution hook script.
+    bool post_always{false};                                      ///< Whether post-hook runs regardless of job exit code.
+
+    std::string job_dir;                                          ///< Job directory path exposed in environment.
+    std::string stage_dir;                                        ///< Stage directory path exposed in environment.
+    std::string run_dir;                                          ///< Active run root directory exposed in environment.
+    std::string output_mode;                                      ///< Formatted terminal output mode.
+    std::string build_dir;                                        ///< Pipeline build output directory.
+    std::string test_dir;                                         ///< Pipeline test output directory.
+    std::string physical_job_dir;                                 ///< Actual canonical host filesystem path for runner script & chdir.
+
+    std::vector<std::pair<std::string, std::string>> env_vars;    ///< Scoped environment variable key-value pairs.
+
+    // Runtime state tracked by backend
+    pid_t pid{0};                                                 ///< Host process ID (for local backend).
+    std::string grid_id;                                          ///< Remote cluster batch job ID (for template backend).
+    JobStatus status{JobStatus::QUEUED};                          ///< Current execution status.
+    int exit_code{0};                                             ///< Final exit code recorded upon job termination.
+    std::chrono::steady_clock::time_point start_time;             ///< Timestamp when job was launched.
+    std::chrono::steady_clock::time_point end_time;               ///< Timestamp when job completed.
+};
+
+/**
+ * @struct PollResult
+ * @brief Status outcome returned by ExecutionBackend::poll.
+ */
+struct PollResult {
+    bool finished{false};                 ///< True if the job has finished executing.
+    JobStatus status{JobStatus::RUNNING}; ///< Current or final status (RUNNING, PASSED, FAILED, ABORTED).
+    int exit_code{0};                     ///< Process or batch exit code if finished.
+};
+
+/**
+ * @class ExecutionBackend
+ * @brief Abstract base class defining the execution interface for dispatching and tracking jobs.
+ */
+class ExecutionBackend {
+public:
+    virtual ~ExecutionBackend() = default;
+
+    /**
+     * @brief Gets the identifier name of this backend.
+     * @return String view representing backend name (e.g. "local", "slurm").
+     */
+    virtual std::string_view name() const = 0;
+
+    /**
+     * @brief Submits or spawns a job asynchronously.
+     * @param ctx Execution context containing paths, scripts, and environment.
+     */
+    virtual void submit(JobExecutionContext& ctx) = 0;
+
+    /**
+     * @brief Polls the status of a previously submitted job without blocking.
+     * @param ctx Execution context for the job.
+     * @return PollResult containing finished flag, status, and exit code.
+     */
+    virtual PollResult poll(JobExecutionContext& ctx) = 0;
+
+    /**
+     * @brief Cancels or terminates a running job.
+     * @param ctx Execution context for the job to cancel.
+     */
+    virtual void cancel(JobExecutionContext& ctx) = 0;
+};
+
+/**
+ * @class LocalBackend
+ * @brief POSIX execution backend using fork, execvp, dedicated process groups, and SIGTERM/SIGKILL signal trees.
+ */
+class LocalBackend : public ExecutionBackend {
+public:
+    std::string_view name() const override { return "local"; }
+
+    void submit(JobExecutionContext& ctx) override;
+    PollResult poll(JobExecutionContext& ctx) override;
+    void cancel(JobExecutionContext& ctx) override;
+
+    /**
+     * @brief Generates self-contained POSIX shell runner script (`runner.sh`) for execution inside the job folder.
+     * @param ctx Job execution context containing commands, hooks, and environment.
+     * @return Complete bash script content.
+     */
+    static std::string generate_runner_script(const JobExecutionContext& ctx);
+};
+
+/**
+ * @class TemplateBackend
+ * @brief Generic grid backend driven by user-defined command templates (e.g. Slurm sbatch, SGE qsub, LSF bsub).
+ */
+class TemplateBackend : public ExecutionBackend {
+public:
+    explicit TemplateBackend(const BackendConfig& config) : config_(config) {}
+
+    std::string_view name() const override { return config_.name; }
+
+    void submit(JobExecutionContext& ctx) override;
+    PollResult poll(JobExecutionContext& ctx) override;
+    void cancel(JobExecutionContext& ctx) override;
+
+private:
+    std::string substitute(std::string_view template_str, const JobExecutionContext& ctx) const;
+    static std::string execute_capture(const std::string& cmd);
+
+    BackendConfig config_;
+};
+
+/**
+ * @class BackendFactory
+ * @brief Factory class for instantiating execution backend instances from configuration specifications.
+ */
+class BackendFactory {
+public:
+    /**
+     * @brief Instantiates a backend implementation matching the provided configuration.
+     * @param config Backend configuration specification.
+     * @return Unique pointer to the constructed ExecutionBackend instance.
+     */
+    static std::unique_ptr<ExecutionBackend> create(const BackendConfig& config);
+};
+
+} // namespace condor

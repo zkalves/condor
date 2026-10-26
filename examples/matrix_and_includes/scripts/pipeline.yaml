@@ -1,0 +1,49 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+name: matrix_and_includes_pipeline
+
+variables:
+  base_seed: "42"
+  iterations: "1000"
+
+settings:
+  max_parallel_jobs: 4
+  base_output_dir: "./condor_runs"
+  path_style: relative      # Demonstrates portable relative path mode
+  output_mode: summary
+  on_failure_action: abort
+
+# Global defaults inherited by all stages and jobs
+defaults:
+  command: "bash ${CONDOR_PIPELINE_DIR}/run_test.sh"
+  variables:
+    ITERATIONS: "${iterations}"
+  hooks:
+    pre: "echo '[HOOK] Starting job ${CONDOR_JOB_NAME}...'"
+
+stages:
+  # Stage demonstrating test replication with count: 4
+  - name: stress_matrix
+    defaults:
+      variables:
+        ITERATIONS: "2000"
+    jobs:
+      - name: parallel_stress
+        count: 4
+
+  # Stage demonstrating external test suite inclusion and seeds parameter sweeps
+  - name: parameter_sweep
+    depends_on: [stress_matrix]
+    include: "test_suite.yaml"
+
+  # Summary report stage
+  - name: summary
+    depends_on: [parameter_sweep]
+    command: "bash ${CONDOR_PIPELINE_DIR}/report.sh"

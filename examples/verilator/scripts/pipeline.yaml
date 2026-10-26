@@ -1,0 +1,48 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+name: verilator_alu_pipeline
+
+variables:
+  coverage: "0"
+  verilator_bin: "verilator"
+  verilator_cov: "verilator_coverage"
+
+settings:
+  max_parallel_jobs: 4
+  base_output_dir: "./condor_runs"
+  on_failure_action: "abort"
+  status_interval_sec: 5
+
+hooks:
+  post: "if [ -f \"${CONDOR_RUN_DIR}/report/0001/terminal_report.txt\" ]; then cat \"${CONDOR_RUN_DIR}/report/0001/terminal_report.txt\"; elif [ -f \"${CONDOR_RUN_DIR}/report/0001/test_report.txt\" ]; then cat \"${CONDOR_RUN_DIR}/report/0001/test_report.txt\"; fi"
+  always: true
+
+stages:
+  - name: build_rtl
+    jobs:
+      - name: verilate_alu
+        command: "bash ${CONDOR_PIPELINE_DIR}/build.sh"
+
+  - name: sim_tests
+    depends_on: [build_rtl]
+    include: "alu_tests.yaml"
+
+  - name: coverage_analysis
+    depends_on: [sim_tests]
+    enabled_if: "${coverage} == '1'"
+    jobs:
+      - name: merge_and_report_coverage
+        command: "bash ${CONDOR_PIPELINE_DIR}/coverage.sh"
+
+  - name: report
+    depends_on: [sim_tests, coverage_analysis]
+    jobs:
+      - name: pipeline_report
+        command: "bash ${CONDOR_PIPELINE_DIR}/report.sh"

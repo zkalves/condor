@@ -1,0 +1,39 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+name: simple_pipeline
+
+variables:
+  arch: "x86_64"
+  build_type: "Release"
+
+settings:
+  max_parallel_jobs: 4
+  base_output_dir: "./condor_runs"
+  on_failure_action: "abort"
+  status_interval_sec: 10
+  output_mode: "all"
+
+stages:
+  - name: build
+    jobs:
+      - name: compile_app
+        command: "bash ${CONDOR_PIPELINE_DIR}/build.sh"
+
+  - name: test
+    depends_on: [build]
+    defaults:
+      command: "bash ${CONDOR_PIPELINE_DIR}/test.sh"
+    jobs:
+      - name: unit_tests
+      - name: integration_tests
+
+  - name: package
+    depends_on: [test]
+    command: "bash ${CONDOR_PIPELINE_DIR}/package.sh"

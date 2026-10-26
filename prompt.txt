@@ -1,0 +1,100 @@
+Create a complete, production-grade C++20 parallel process and grid orchestrator named `condor`. The tool must be free, open-source software (FOSS) using only modern C++20 and standard POSIX APIs. External dependencies are strictly limited to `yaml-cpp` (v0.9.0 via `find_package` or CMake `FetchContent`) and `CLI11` (v2.6+ header-only via `FetchContent`). Boost and proprietary libraries are prohibited.
+
+### 1. Architectural & Execution Requirements
+
+1. **Toolchain & Standards:**
+   - Standard: C++20 (`-std=c++20`).
+   - Platform support: Rocky Linux 9, RHEL 8/9, Debian 12, Ubuntu 22.04/24.04.
+   - Build system: CMake 3.20+ with automatic `FetchContent` fallbacks for `yaml-cpp` and `CLI11`.
+
+2. **Strict Naming Validation (Stage & Identifier Rules):**
+   - Stage names and variable names must strictly match the POSIX-safe identifier regex: `^[a-zA-Z0-9_-]+$` (printable ASCII alphanumeric characters, underscores, and hyphens only; **no spaces**, slashes, or control characters).
+   - Validate all stage names during YAML configuration parsing. If any stage name violates this rule, immediately throw a descriptive configuration error and exit before creating any directories.
+
+3. **Workspace, Stage, and `<job_id>` Directory Hierarchy:**
+   - **Timestamped Run Root (Default):**
+     - Base output directory defaults to `./condor_runs/` (overridable via `--base-output-dir`).
+     - Each run creates a unique folder: `YYYYMMDD_HHMMSS_<6_digit_random>` (e.g., `20261026_094500_482910`).
+     - Atomically update a `latest` symlink in the base output root pointing to the active run directory.
+   - **Fixed Run Directory Mode:**
+     - When `--run-dir <path>` is passed, execute directly inside that path without creating a new timestamped folder.
+   - **Stage & `<job_id>` Subfolders (Actual Working Directory):**
+     - Each stage creates `<run_dir>/<stage_name>/`.
+     - Each job within a stage is assigned a deterministic sequential `job_id` formatted as a 4-digit zero-padded integer (`0001`, `0002`, ...) and creates its dedicated subdirectory using **only** the ID: `<run_dir>/<stage_name>/<job_id>/` (e.g., `<run_dir>/build_rtl/0001/`).
+     - Write a `<run_dir>/<stage_name>/stage_manifest.txt` mapping each `<job_id>` to its `job_name`, command, and status for instant human reference.
+     - **Working Directory Execution:** Before executing any job (local or grid wrapper), the child process MUST `chdir()` into `<run_dir>/<stage_name>/<job_id>/` so the invoked user tool runs directly inside that folder and dumps all native artifacts there.
+     - Standard streams are redirected via `dup2()` to `<run_dir>/<stage_name>/<job_id>/stdout.log` and `<run_dir>/<stage_name>/<job_id>/stderr.err`.
+     - Write job metadata (`job_id`, `job_name`, `stage_name`, `pid_or_grid_id`, `status`, `exit_code`, `elapsed_sec`) to `<run_dir>/<stage_name>/<job_id>/job_status.txt`.
+
+4. **Application-Independent Variables & Conditional Stages/Jobs (`enabled_if`):**
+   - Support a top-level `variables:` map in YAML containing arbitrary user-defined key-value pairs (e.g., `coverage: "0"`, `seed: "1"`), overridable from the CLI via `--define-variable KEY=VAL`.
+   - **Interpolation & Environment Export:**
+     - Interpolate `${KEY}` placeholders in all `command`, `pre`, `post`, and `enabled_if` strings.
+     - Export all user variables to child environments as `CONDOR_VAR_<UPPER_KEY>=<VAL>` (e.g., `CONDOR_VAR_COVERAGE=1`) so build, test, coverage, and report scripts can dynamically adapt without hardcoding tool logic inside `condor`.
+   - **Conditional Execution (`enabled_if`):**
+     - Both stages and individual jobs support an optional `enabled_if` expression (e.g., `enabled_if: "${coverage} == '1'"` or `"${coverage} != '0'"`).
+     - If `enabled_if` evaluates to false, mark the stage or job as `SKIPPED`.
+     - In the DAG scheduler, `SKIPPED` jobs immediately satisfy dependency edges for downstream jobs so dependent stages (such as `report`) still execute normally.
+
+5. **Failure Modes & Configurable Exit Code Policy:**
+   - **Failure Action (`on_failure_action`):**
+     - `abort`: Immediately terminate all active local process groups and cancel active grid jobs.
+     - `continue`: Keep executing unaffected independent DAG branches.
+     - `stage_barrier`: Complete active jobs in the current stage, then halt before subsequent stages.
+   - **Exit Code Control (`allow_failure` & `exit_zero_on_failure`):**
+     - Per-job and per-stage option `allow_failure: true | false` (default `false`). If `true`, a non-zero return code records the job/stage as `FAILED (ALLOWED)` without triggering pipeline failure or blocking downstream steps.
+     - Global YAML setting `exit_zero_on_failure: true | false` and CLI flag `--exit-zero-on-failure`: When enabled, `condor` records all failures in logs and status files but exits the main process with return code `0`. Otherwise, exit with a non-zero code on any unallowed failure.
+
+6. **Signal Handling (`CTRL+C` Twice) & Interactive Runtime Menu:**
+   - **Double `CTRL+C` Hard Kill:**
+     - Track the timestamp of `SIGINT` atomically.
+     - First `SIGINT`: Pause live redraws, print `(Press CTRL+C again within 2 seconds to abort all jobs, or use the runtime menu)`, and open the interactive runtime menu.
+     - Second `SIGINT` (within 2 seconds or while in menu): Immediately send `SIGTERM` then `SIGKILL` to all active local process groups (`kill(-pgid, SIGKILL)`), invoke the grid `cancel` command for all active remote jobs, mark killed jobs as `ABORTED`, and exit.
+   - **Interactive Runtime Menu:**
+     - Accessible via single `CTRL+C` or pressing `m` during execution (polled non-blockingly via `poll()` on `STDIN_FILENO`).
+     - Commands:
+       - `[s]` **Status**: Print detailed table of stages and running jobs (Job ID, Job Name, Stage, Backend, OS PID / Grid ID, Elapsed, Dir).
+       - `[p]` **Pause / Resume**: Pause dispatching new queued jobs while active jobs finish, or resume.
+       - `[k <job_id>]` **Kill Job**: Terminate a specific active local or grid job by its `<job_id>`.
+       - `[j <N>]` **Scale Slots**: Dynamically adjust the maximum parallel local job limit at runtime.
+       - `[c]` **Continue**: Resume live progress display.
+       - `[q]` **Quit / Abort All**: Terminate all local and grid jobs immediately.
+
+7. **Universal Live Progress Display & CI Periodic Status Dump:**
+   - **Interactive Terminal Mode (TTY):**
+     - Render a live progress display working across both sequential stages and cross-stage DAGs:
+       - Global DAG Bar: `[#####-----] 50% | Total: 20 | Running: 4 | Queued: 3 | Skipped: 2 | Passed: 10 | Failed: 1 | Elapsed: 00:02:14`
+       - Stage Summary Line: Compact counters per stage `stage_name(Pass/Total, Run, Fail, Skip)`.
+       - Active Job Ticker: `[0004] test/smoke_test (PID: 48219) - 00:01:12`.
+   - **CI / Non-Interactive Periodic Status Dump (`--status-interval-sec <N>`):**
+     - Configurable via YAML (`settings.status_interval_sec`) and CLI (`--status-interval-sec <seconds>`).
+     - Print a clean, single-line timestamped status summary (`[2026-10-26 09:45:00] PROGRESS: 50% (10/20 passed, 4 running, 3 queued, 2 skipped, 1 failed)`) every `<N>` seconds alongside individual job start/finish events.
+
+8. **Three-Tier Pre/Post Hooks & Environment Injection:**
+   - Pre and post scripts at Global Pipeline, Stage, and Job levels.
+   - Post hooks support `always: true`.
+   - Export built-in environment variables to every hook and job:
+     - `CONDOR_RUN_DIR`, `CONDOR_STAGE_NAME`, `CONDOR_STAGE_DIR`, `CONDOR_JOB_ID`, `CONDOR_JOB_NAME`, `CONDOR_JOB_DIR`, `CONDOR_STATUS`, `CONDOR_EXIT_CODE`, plus all `CONDOR_VAR_<KEY>` user variables.
+
+9. **Pluggable & Template-Driven Backends:**
+   - Abstract `ExecutionBackend` interface (`submit()`, `poll()`, `cancel()`).
+   - `LocalBackend`: Uses POSIX `fork()`, `setpgid(0, 0)`, `chdir(job_dir)`, `dup2()`, `execvp()`, and non-blocking `waitpid(WNOHANG)`.
+   - `TemplateBackend`: Generates `<job_dir>/job_runner.sh` that `cd`s into `{job_dir}` and executes pre-hook, command, and post-hook. Supports configurable `submit`, `poll`, and `cancel` commands with `{job_id}`, `{job_name}`, `{job_dir}`, `{stage_dir}`, `{script}`, and `{grid_id}` placeholders, plus built-in presets for `slurm` and `sge`.
+
+### 2. Descriptive CLI Interface (`CLI11`)
+
+Syntax: `condor [OPTIONS] <pipeline.yaml>`
+
+* `--pipeline-config <path>` (or positional `<pipeline.yaml>`): Path to pipeline YAML configuration.
+* `--stage <name>`: Run only the specified stage (validated against `^[a-zA-Z0-9_-]+$`).
+* `--max-parallel-jobs <N>`: Maximum concurrent local jobs (defaults to `std::thread::hardware_concurrency()`).
+* `--base-output-dir <path>`: Base folder for timestamped runs (default: `./condor_runs`).
+* `--run-dir <path>`: Run inside an explicit fixed directory instead of generating a timestamped directory.
+* `--backend-override <name>`: Override default execution backend.
+* `--on-failure-action <abort|continue|stage_barrier>`: Override failure policy.
+* `--exit-zero-on-failure`: Force return code `0` even if jobs or stages fail.
+* `--status-interval-sec <N>`: Interval in seconds to dump status summaries in CI/non-interactive mode (default: `30`).
+* `--define-variable <KEY=VAL>`: Define or override configuration variables (repeatable, e.g., `--define-variable coverage=1`).
+* `--dry-run`: Validate stage names, DAG cycles, evaluate `enabled_if` conditions, print execution plan and directory paths, and exit.
+* `--no-interactive`: Disable interactive stdin polling and ANSI progress redraws (CI mode).
+* `--verbose-logging`: Enable detailed scheduler event logging.
