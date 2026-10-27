@@ -205,33 +205,92 @@ hooks:
 
 ---
 
-## 7. Custom Execution Backends (`backends:`)
+## 7. Execution Backends & Grid Engine Family (`backends:`)
 
-Define template-based backends to offload compute-heavy jobs to cluster schedulers (Slurm, Sun Grid Engine, LSF) or remote containers:
+Condor provides an extensible, dynamic backend architecture. Backends are **not hardcoded in the C++ binaries**; instead, only `local` is the internal POSIX process execution engine, while all distributed grid schedulers are dynamically loaded from modular YAML definition files or pipeline specifications.
+
+### Supported Distributed Grid Engines (Pre-configured)
+
+Condor includes production-grade configuration definitions for industry-standard grid schedulers:
+
+| Backend Identifier | Grid Engine / Cluster System | Command Ecosystem | Key Capabilities |
+| :--- | :--- | :--- | :--- |
+| **`slurm`** | **Slurm Workload Manager** | `sbatch`, `squeue`, `scancel` | High-performance computing clusters, `--parsable` ID extraction, batch job states |
+| **`sge`** / **`gridengine`** | **Grid Engine Family** (Sun Grid Engine / Altair Grid Engine / Open Grid Scheduler) | `qsub`, `qstat`, `qdel` | `-terse` submission ID parsing, queue status polling, job deletion |
+| **`lsf`** | **IBM Spectrum LSF** (Load Sharing Facility) | `bsub`, `bjobs`, `bkill` | Semiconductor & EDA design clusters, `Job <ID>` regex parsing, `DONE`/`EXIT` status |
+| **`pbs`** | **PBS Professional** (Portable Batch System) | `qsub`, `qstat`, `qdel` | Enterprise HPC workload scheduling, job state tracking (`job_state = F/R/Q`) |
+| **`torque`** | **TORQUE Resource Manager** | `qsub`, `qstat`, `qdel` | PBS-derivative open-source resource manager |
+| **`spark`** | **Apache Spark** (Distributed Data Grid Engine) | `spark-submit` | Cluster-mode distributed big-data driver execution, `driver-XXXX` status monitoring |
+
+To list all available backends recognized on the system at any time, run:
+```bash
+condor --list-backends
+```
+
+---
+
+### Backend Configuration File Search Paths
+
+Condor locates backend configuration files by searching the following locations in order:
+
+1. **Environment Variables**: `$CONDOR_BACKEND_DIR` or `$CONDOR_BACKEND_PATH` (colon-delimited paths)
+2. **Pipeline Directory**: `<pipeline_dir>/backends/<name>.yaml` or `<pipeline_dir>/<name>.yaml`
+3. **Current Working Directory**: `./backends/<name>.yaml` or `./res/backends/<name>.yaml`
+4. **User Configuration**: `~/.config/condor/backends/<name>.yaml`
+5. **Executable-Relative Share**: `<condor_bin_dir>/../share/condor/backends/<name>.yaml`
+6. **System Standard Directories**: `/usr/local/share/condor/backends/`, `/usr/share/condor/backends/`, `/etc/condor/backends/`
+
+---
+
+### Custom Pipeline Backend Definition
+
+You can define custom template backends or override existing configurations directly within pipeline YAML files:
 
 ```yaml
 backends:
-  slurm_grid:
+  lsf_high_priority:
     type: template
-    submit_command: "sbatch --parsable --job-name={job_name} {script}"
-    poll_command: "squeue -j {grid_id} -h -o %T"
-    cancel_command: "scancel {grid_id}"
+    description: "LSF High-Priority EDA Queue"
+    submit_command: "bsub -q priority -o {job_dir}/stdout.log -e {job_dir}/stderr.err < {script}"
+    poll_command: "bjobs -noheader -o \"stat\" {grid_id}"
+    cancel_command: "bkill {grid_id}"
+    job_id_regex: "Job <([0-9]+)>|([0-9]+)"
+    success_pattern: "DONE"
+    failure_pattern: "EXIT|UNKWN|ZOMBI"
+    running_pattern: "PEND|RUN|SSUSP|USUSP|WAIT"
+    empty_poll_means_done: true
 
 stages:
-  - name: cluster_simulations
-    backend: slurm_grid         # Stage-level backend assignment
+  - name: physical_synthesis
+    backend: lsf_high_priority    # Stage-level backend assignment
     jobs:
-      - name: monte_carlo_sim
+      - name: route_block_a
       - name: local_sanity_probe
-        backend: local          # Job-level backend override to run locally
+        backend: local            # Job-level backend override to run locally
 ```
 
-Supported template placeholders:
-- `{script}`: Full path to the generated `job_runner.sh` script
-- `{grid_id}`: Job ID returned by `submit_command`
-- `{job_id}`: Sequential 4-digit Condor job identifier (`0001`)
-- `{job_name}`: Configured job name
-- `{job_dir}`: Job working directory
-- `{stage_dir}`: Stage directory
-- `{run_dir}`: Run directory
-- `${VAR}`: Any pipeline or context environment variable
+### Supported Configuration Attributes
+
+| Attribute | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `type` | string | `template` | `local` for direct POSIX fork/exec, or `template` for external batch runners. |
+| `description` | string | `""` | Human-readable description displayed in `--list-backends`. |
+| `submit_command` | string | required | Command line executed to submit a job to the cluster. |
+| `poll_command` | string | required | Command line executed to query job status. |
+| `cancel_command` | string | required | Command line executed to terminate/kill a running job. |
+| `job_id_regex` | string | `""` | Regular expression capturing the remote job ID from submit output. Defaults to first token. |
+| `success_pattern`| string | auto | Regular expression matching job completion (`COMPLETED`, `DONE`, `FINISHED`). |
+| `failure_pattern`| string | auto | Regular expression matching job failure (`FAILED`, `CANCELLED`, `TIMEOUT`, `EXIT`, `ERROR`). |
+| `running_pattern`| string | auto | Regular expression matching active jobs (`RUNNING`, `PENDING`, `RUN`, `PEND`, `QUEUED`). |
+| `empty_poll_means_done` | bool | `true` | If true, empty poll output signifies that the job finished and cleared the queue. |
+
+### Supported Template Placeholders
+- `{script}`: Full filesystem path to the generated `job_runner.sh` execution wrapper script
+- `{grid_id}`: Remote cluster job ID returned by `submit_command`
+- `{job_id}`: Sequential zero-padded 4-digit Condor job identifier (`0001`, `0002`, ...)
+- `{job_name}`: Descriptive human-readable job name
+- `{job_dir}`: Dedicated per-job working directory
+- `{stage_name}`: Parent stage identifier
+- `{stage_dir}`: Stage directory path
+- `{run_dir}`: Active run root directory
+- `${VAR}`: Any pipeline or host environment variable (e.g. `${SPARK_MASTER}`, `${QUEUE}`)

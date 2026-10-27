@@ -25,6 +25,9 @@
 #include <vector>
 #include <memory>
 #include <chrono>
+#include <optional>
+#include <unordered_map>
+#include <filesystem>
 #include <sys/types.h>
 #include "condor/common.hpp"
 #include "condor/config.hpp"
@@ -160,6 +163,45 @@ public:
      * @return Unique pointer to the constructed ExecutionBackend instance.
      */
     static std::unique_ptr<ExecutionBackend> create(const BackendConfig& config);
+};
+
+/**
+ * @class BackendRegistry
+ * @brief Dynamic backend discovery and configuration loader facility.
+ *
+ * Discovers and loads external YAML backend definitions (Slurm, SGE/Grid Engine,
+ * IBM Spectrum LSF, PBS Pro / TORQUE, Apache Spark) without hardcoding them into C++ sources.
+ */
+class BackendRegistry {
+public:
+    /**
+     * @brief Returns candidate filesystem directories where backend definition files are located.
+     * @param pipeline_dir Optional directory of the active pipeline file.
+     * @return Ordered list of directories to query.
+     */
+    static std::vector<std::filesystem::path> get_search_paths(const std::string& pipeline_dir = "");
+
+    /**
+     * @brief Discovers all backend configuration files available across the search paths.
+     * @param pipeline_dir Optional directory of the active pipeline file.
+     * @return Map of backend names to parsed BackendConfig structs.
+     */
+    static std::unordered_map<std::string, BackendConfig> discover_backends(const std::string& pipeline_dir = "");
+
+    /**
+     * @brief Attempts to load a specific backend configuration by name from search paths.
+     * @param backend_name Name of backend (e.g. "slurm", "sge", "lsf", "pbs", "torque", "spark").
+     * @param pipeline_dir Optional directory of the active pipeline file.
+     * @return Loaded BackendConfig if found, or std::nullopt.
+     */
+    static std::optional<BackendConfig> load_backend(const std::string& backend_name, const std::string& pipeline_dir = "");
+
+    /**
+     * @brief Parses an individual backend YAML file into a BackendConfig struct.
+     * @param filepath Path to the YAML backend definition file.
+     * @return Parsed BackendConfig struct.
+     */
+    static BackendConfig parse_backend_file(const std::filesystem::path& filepath);
 };
 
 } // namespace condor

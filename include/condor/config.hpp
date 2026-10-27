@@ -38,6 +38,14 @@ enum class BackendType {
     TEMPLATE   ///< Remote cluster or grid execution via parameterized shell command templates (e.g. Slurm, SGE, LSF).
 };
 
+inline std::string to_string(BackendType type) {
+    switch (type) {
+        case BackendType::LOCAL: return "local";
+        case BackendType::TEMPLATE: return "template";
+    }
+    return "unknown";
+}
+
 /**
  * @struct BackendConfig
  * @brief Definition of an execution backend, including command templates for submission, polling, and cancellation.
@@ -45,9 +53,15 @@ enum class BackendType {
 struct BackendConfig {
     std::string name{"local"};             ///< Unique name of backend identifier.
     BackendType type{BackendType::LOCAL};   ///< Backend execution type.
+    std::string description;                ///< Human-readable description of backend.
     std::string submit_command;             ///< Template string executed to submit a job to the cluster.
     std::string poll_command;               ///< Template string executed to poll a submitted job's status.
     std::string cancel_command;             ///< Template string executed to cancel or kill a running job.
+    std::string job_id_regex;               ///< Optional regex to extract the grid_id from submit command output.
+    std::string success_pattern;            ///< Regex pattern identifying finished/successful jobs.
+    std::string failure_pattern;            ///< Regex pattern identifying failed/aborted jobs.
+    std::string running_pattern;            ///< Regex pattern identifying active/queued jobs.
+    bool empty_poll_means_done{true};       ///< If poll output is empty, treat as completed.
 };
 
 /**

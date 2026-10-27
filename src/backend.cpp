@@ -29,6 +29,9 @@
 #include <signal.h>
 #include <cstring>
 #include <array>
+#include <regex>
+#include <climits>
+#include <yaml-cpp/yaml.h>
 
 namespace condor {
 
@@ -339,10 +342,27 @@ void TemplateBackend::submit(JobExecutionContext& ctx) {
     CONDOR_LOG_DEBUG("Template submit command: " + submit_cmd);
     std::string output = execute_capture(submit_cmd);
 
-    // Extract first token or line as grid_id
-    std::istringstream iss(output);
     std::string id;
-    iss >> id;
+    if (!config_.job_id_regex.empty()) {
+        try {
+            std::regex re(config_.job_id_regex);
+            std::smatch match;
+            if (std::regex_search(output, match, re)) {
+                if (match.size() > 1) {
+                    id = match[1].str();
+                } else {
+                    id = match[0].str();
+                }
+            }
+        } catch (const std::exception& e) {
+            CONDOR_LOG_WARN("Failed regex matching for job_id: " + std::string(e.what()));
+        }
+    }
+
+    if (id.empty()) {
+        std::istringstream iss(output);
+        iss >> id;
+    }
     if (id.empty()) {
         id = "UNKNOWN";
     }
@@ -357,29 +377,53 @@ PollResult TemplateBackend::poll(JobExecutionContext& ctx) {
     std::string output = execute_capture(poll_cmd);
 
     if (output.empty()) {
-        // Output empty often means job finished in Slurm / SGE
-        ctx.status = JobStatus::PASSED;
-        ctx.exit_code = 0;
-        ctx.end_time = std::chrono::steady_clock::now();
-        return {true, JobStatus::PASSED, 0};
+        if (config_.empty_poll_means_done) {
+            ctx.status = JobStatus::PASSED;
+            ctx.exit_code = 0;
+            ctx.end_time = std::chrono::steady_clock::now();
+            return {true, JobStatus::PASSED, 0};
+        }
+        return {false, JobStatus::RUNNING, 0};
     }
 
-    // Check for failure keywords in grid output
-    if (output.find("FAILED") != std::string::npos ||
-        output.find("CANCELLED") != std::string::npos ||
-        output.find("TIMEOUT") != std::string::npos) {
-        ctx.status = JobStatus::FAILED;
-        ctx.exit_code = 1;
-        ctx.end_time = std::chrono::steady_clock::now();
-        return {true, JobStatus::FAILED, 1};
-    }
+    // Check failure patterns first
+    std::string fail_pat = !config_.failure_pattern.empty()
+        ? config_.failure_pattern
+        : "FAILED|CANCELLED|TIMEOUT|NODE_FAIL|EXIT|KILLED|ERROR|LOST";
+    try {
+        std::regex fail_re(fail_pat, std::regex::icase);
+        if (std::regex_search(output, fail_re)) {
+            ctx.status = JobStatus::FAILED;
+            ctx.exit_code = 1;
+            ctx.end_time = std::chrono::steady_clock::now();
+            return {true, JobStatus::FAILED, 1};
+        }
+    } catch (...) {}
 
-    if (output.find("COMPLETED") != std::string::npos) {
-        ctx.status = JobStatus::PASSED;
-        ctx.exit_code = 0;
-        ctx.end_time = std::chrono::steady_clock::now();
-        return {true, JobStatus::PASSED, 0};
-    }
+    // Check success patterns
+    std::string succ_pat = !config_.success_pattern.empty()
+        ? config_.success_pattern
+        : "COMPLETED|DONE|FINISHED|PASSED|SUCCESS";
+    try {
+        std::regex succ_re(succ_pat, std::regex::icase);
+        if (std::regex_search(output, succ_re)) {
+            ctx.status = JobStatus::PASSED;
+            ctx.exit_code = 0;
+            ctx.end_time = std::chrono::steady_clock::now();
+            return {true, JobStatus::PASSED, 0};
+        }
+    } catch (...) {}
+
+    // Check running patterns
+    std::string run_pat = !config_.running_pattern.empty()
+        ? config_.running_pattern
+        : "RUNNING|PENDING|PEND|RUN|SUBMITTED|QUEUED|WAITING|CONFIGURING";
+    try {
+        std::regex run_re(run_pat, std::regex::icase);
+        if (std::regex_search(output, run_re)) {
+            return {false, JobStatus::RUNNING, 0};
+        }
+    } catch (...) {}
 
     // Still running / queued in grid
     return {false, JobStatus::RUNNING, 0};
@@ -401,6 +445,149 @@ std::unique_ptr<ExecutionBackend> BackendFactory::create(const BackendConfig& co
         return std::make_unique<LocalBackend>();
     }
     return std::make_unique<TemplateBackend>(config);
+}
+
+std::vector<std::filesystem::path> BackendRegistry::get_search_paths(const std::string& pipeline_dir) {
+    std::vector<std::filesystem::path> paths;
+
+    // 1. CONDOR_BACKEND_DIR / CONDOR_BACKEND_PATH environment variables
+    const char* env_dir = std::getenv("CONDOR_BACKEND_DIR");
+    if (env_dir && *env_dir) {
+        paths.emplace_back(env_dir);
+    }
+    const char* env_path = std::getenv("CONDOR_BACKEND_PATH");
+    if (env_path && *env_path) {
+        std::string pstr(env_path);
+        std::stringstream ss(pstr);
+        std::string item;
+        while (std::getline(ss, item, ':')) {
+            if (!item.empty()) paths.emplace_back(item);
+        }
+    }
+
+    // 2. Pipeline directory
+    if (!pipeline_dir.empty()) {
+        paths.emplace_back(std::filesystem::path(pipeline_dir) / "backends");
+        paths.emplace_back(pipeline_dir);
+    }
+
+    // 3. Current working directory
+    paths.emplace_back("./backends");
+    paths.emplace_back("./res/backends");
+    paths.emplace_back(".");
+
+    // 4. User configuration directory ($HOME/.config/condor/backends)
+    const char* home = std::getenv("HOME");
+    if (home && *home) {
+        paths.emplace_back(std::filesystem::path(home) / ".config" / "condor" / "backends");
+    }
+
+    // 5. Binary relative paths (/proc/self/exe on Linux)
+    char exe_buf[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+    if (len > 0) {
+        exe_buf[len] = '\0';
+        std::filesystem::path exe_path(exe_buf);
+        std::filesystem::path exe_dir = exe_path.parent_path();
+        paths.emplace_back(exe_dir.parent_path() / "share" / "condor" / "backends");
+        paths.emplace_back(exe_dir.parent_path() / "res" / "backends");
+        paths.emplace_back(exe_dir / "res" / "backends");
+        paths.emplace_back(exe_dir / "backends");
+    }
+
+    // 6. System standard paths
+    paths.emplace_back("/usr/local/share/condor/backends");
+    paths.emplace_back("/usr/share/condor/backends");
+    paths.emplace_back("/etc/condor/backends");
+
+    return paths;
+}
+
+BackendConfig BackendRegistry::parse_backend_file(const std::filesystem::path& filepath) {
+    YAML::Node root;
+    try {
+        root = YAML::LoadFile(filepath.string());
+    } catch (const std::exception& e) {
+        throw ConfigurationError("Failed to parse backend configuration file '" + filepath.string() + "': " + e.what());
+    }
+
+    BackendConfig cfg;
+    std::string stem = filepath.stem().string();
+    cfg.name = stem;
+    cfg.type = BackendType::TEMPLATE;
+
+    YAML::Node node = root;
+    // Check if nested under backends: { <name>: { ... } }
+    if (root["backends"] && root["backends"].IsMap()) {
+        for (auto it = root["backends"].begin(); it != root["backends"].end(); ++it) {
+            cfg.name = it->first.as<std::string>();
+            node = it->second;
+            break;
+        }
+    } else if (root["name"]) {
+        cfg.name = root["name"].as<std::string>();
+    }
+
+    if (node["description"]) cfg.description = node["description"].as<std::string>();
+    if (node["type"]) {
+        std::string t = node["type"].as<std::string>();
+        cfg.type = (t == "local") ? BackendType::LOCAL : BackendType::TEMPLATE;
+    }
+    if (node["submit_command"]) cfg.submit_command = node["submit_command"].as<std::string>();
+    if (node["poll_command"])   cfg.poll_command   = node["poll_command"].as<std::string>();
+    if (node["cancel_command"]) cfg.cancel_command = node["cancel_command"].as<std::string>();
+    if (node["job_id_regex"])   cfg.job_id_regex   = node["job_id_regex"].as<std::string>();
+    if (node["success_pattern"]) cfg.success_pattern = node["success_pattern"].as<std::string>();
+    if (node["failure_pattern"]) cfg.failure_pattern = node["failure_pattern"].as<std::string>();
+    if (node["running_pattern"]) cfg.running_pattern = node["running_pattern"].as<std::string>();
+    if (node["empty_poll_means_done"]) cfg.empty_poll_means_done = node["empty_poll_means_done"].as<bool>();
+
+    return cfg;
+}
+
+std::optional<BackendConfig> BackendRegistry::load_backend(const std::string& backend_name, const std::string& pipeline_dir) {
+    auto search_paths = get_search_paths(pipeline_dir);
+    for (const auto& p : search_paths) {
+        std::error_code ec;
+        if (!std::filesystem::exists(p, ec) || !std::filesystem::is_directory(p, ec)) {
+            continue;
+        }
+        std::filesystem::path candidate_yaml = p / (backend_name + ".yaml");
+        if (std::filesystem::exists(candidate_yaml, ec) && std::filesystem::is_regular_file(candidate_yaml, ec)) {
+            return parse_backend_file(candidate_yaml);
+        }
+        std::filesystem::path candidate_yml = p / (backend_name + ".yml");
+        if (std::filesystem::exists(candidate_yml, ec) && std::filesystem::is_regular_file(candidate_yml, ec)) {
+            return parse_backend_file(candidate_yml);
+        }
+    }
+    return std::nullopt;
+}
+
+std::unordered_map<std::string, BackendConfig> BackendRegistry::discover_backends(const std::string& pipeline_dir) {
+    std::unordered_map<std::string, BackendConfig> backends;
+    auto search_paths = get_search_paths(pipeline_dir);
+    for (const auto& p : search_paths) {
+        std::error_code ec;
+        if (!std::filesystem::exists(p, ec) || !std::filesystem::is_directory(p, ec)) {
+            continue;
+        }
+        for (const auto& entry : std::filesystem::directory_iterator(p, ec)) {
+            if (!entry.is_regular_file()) continue;
+            std::string ext = entry.path().extension().string();
+            if (ext == ".yaml" || ext == ".yml") {
+                try {
+                    BackendConfig cfg = parse_backend_file(entry.path());
+                    if (!cfg.name.empty() && backends.find(cfg.name) == backends.end()) {
+                        backends[cfg.name] = cfg;
+                    }
+                } catch (const std::exception& e) {
+                    CONDOR_LOG_DEBUG("Failed parsing candidate backend file " + entry.path().string() + ": " + e.what());
+                }
+            }
+        }
+    }
+    return backends;
 }
 
 } // namespace condor

@@ -18,6 +18,7 @@
  */
 
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <string>
 #include <cstdlib>
@@ -25,6 +26,7 @@
 
 #include "condor/common.hpp"
 #include "condor/config.hpp"
+#include "condor/backend.hpp"
 #include "condor/parser.hpp"
 #include "condor/variable.hpp"
 #include "condor/expression.hpp"
@@ -97,6 +99,25 @@ int main(int argc, char** argv) {
         RuntimeMenu::print_conditions();
         std::exit(0);
     }, "Display GNU General Public License redistribution conditions");
+    app.add_flag_callback("--list-backends", []() {
+        std::cout << "====================== CONDOR AVAILABLE BACKENDS ======================\n";
+        std::cout << "  " << std::left << std::setw(14) << "local"
+                  << "[local]     Direct local POSIX process execution\n";
+        auto backends = BackendRegistry::discover_backends();
+        std::vector<std::string> names;
+        for (const auto& [name, _] : backends) {
+            if (name != "local") names.push_back(name);
+        }
+        std::sort(names.begin(), names.end());
+        for (const auto& name : names) {
+            const auto& b = backends.at(name);
+            std::cout << "  " << std::left << std::setw(14) << name
+                      << "[" << to_string(b.type) << "]  "
+                      << (b.description.empty() ? "(Custom grid backend)" : b.description) << "\n";
+        }
+        std::cout << "=======================================================================\n";
+        std::exit(0);
+    }, "List all available execution backends discovered on system and exit");
 
     CLI11_PARSE(app, argc, argv);
 

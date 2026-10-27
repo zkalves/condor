@@ -100,9 +100,17 @@ void Scheduler::init_runtime_states() {
             }
 
             auto bit = backends_.find(bname);
+            if (bit == backends_.end()) {
+                auto loaded = BackendRegistry::load_backend(bname);
+                if (loaded) {
+                    backends_[bname] = BackendFactory::create(*loaded);
+                    bit = backends_.find(bname);
+                }
+            }
             if (bit != backends_.end()) {
                 job_state.backend = bit->second.get();
             } else {
+                CONDOR_LOG_WARN("Backend '" + bname + "' not found; falling back to 'local'.");
                 job_state.backend = backends_["local"].get();
             }
 

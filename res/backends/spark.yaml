@@ -1,0 +1,20 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+name: spark
+type: template
+description: "Apache Spark (Distributed Data Grid Engine)"
+submit_command: "spark-submit --master ${SPARK_MASTER:-spark://localhost:7077} --deploy-mode cluster {script}"
+poll_command: "spark-submit --master ${SPARK_MASTER:-spark://localhost:7077} --status {grid_id}"
+cancel_command: "spark-submit --master ${SPARK_MASTER:-spark://localhost:7077} --kill {grid_id}"
+job_id_regex: "(driver-[0-9]+-[0-9]+|app-[0-9]+-[0-9]+)"
+success_pattern: "FINISHED|SUCCESS"
+failure_pattern: "FAILED|KILLED|ERROR"
+running_pattern: "RUNNING|SUBMITTED|WAITING"
+empty_poll_means_done: false

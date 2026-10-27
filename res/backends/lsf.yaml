@@ -1,0 +1,20 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+name: lsf
+type: template
+description: "IBM Spectrum LSF (Load Sharing Facility)"
+submit_command: "bsub -o {job_dir}/stdout.log -e {job_dir}/stderr.err < {script}"
+poll_command: "bjobs -noheader -o \"stat\" {grid_id}"
+cancel_command: "bkill {grid_id}"
+job_id_regex: "Job <([0-9]+)>|([0-9]+)"
+success_pattern: "DONE"
+failure_pattern: "EXIT|UNKWN|ZOMBI"
+running_pattern: "PEND|RUN|SSUSP|USUSP|WAIT"
+empty_poll_means_done: true

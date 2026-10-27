@@ -41,8 +41,8 @@ A modern C++20 parallel process and grid orchestrator designed for high-performa
   - Every job generates both human-readable `job_status.txt` and machine-readable `job_status.yaml`
   - Verilator test harness generates `test_metrics.yaml` and consolidated `pipeline_summary.yaml`
 - **Pluggable Execution Backends**:
-  - `LocalBackend`: POSIX `fork()`, `setpgid()`, `chdir()`, `dup2()`, non-blocking `waitpid(WNOHANG)`
-  - `TemplateBackend`: Generates executable `job_runner.sh`, template placeholders (`{job_id}`, `{script}`, `{grid_id}`), with built-in presets for `slurm` and `sge`
+  - `LocalBackend`: Direct POSIX process group execution (`fork()`, `setpgid()`, `chdir()`, `dup2()`, non-blocking `waitpid(WNOHANG)`)
+  - `TemplateBackend`: Modular, non-hardcoded grid execution loaded dynamically from YAML definition files (Slurm, Grid Engine Family [SGE/AGE/OGS], IBM Spectrum LSF, PBS Professional & TORQUE, Apache Spark) with parameter placeholders (`{job_id}`, `{script}`, `{grid_id}`) and status pattern matching. Discover backends with `condor --list-backends`.
 
 ---
 

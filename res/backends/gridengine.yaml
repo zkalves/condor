@@ -1,0 +1,20 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+name: gridengine
+type: template
+description: "Open Grid Scheduler / Altair Grid Engine"
+submit_command: "qsub -terse {script}"
+poll_command: "qstat -j {grid_id}"
+cancel_command: "qdel {grid_id}"
+job_id_regex: "([0-9]+)"
+success_pattern: "COMPLETED|FINISHED"
+failure_pattern: "Eqw|FAILED|ERROR|ABORTED"
+running_pattern: "qw|hqw|r|t|s|dr"
+empty_poll_means_done: true

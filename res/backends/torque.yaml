@@ -1,0 +1,20 @@
+# This file is part of Condor.
+#
+# Condor is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Copyright (C) 2026 Ezequiel Alves. All rights reserved.
+
+name: torque
+type: template
+description: "TORQUE Resource Manager (PBS-derivative)"
+submit_command: "qsub {script}"
+poll_command: "qstat {grid_id}"
+cancel_command: "qdel {grid_id}"
+job_id_regex: "([0-9]+(\\.[a-zA-Z0-9_-]+)?)"
+success_pattern: "C|COMPLETED"
+failure_pattern: "E|FAILED"
+running_pattern: "R|Q|H|W|T|RUNNING|QUEUED"
+empty_poll_means_done: true

@@ -67,7 +67,7 @@ public:
     static void check_dag_cycles(const PipelineConfig& config);
 
 private:
-    static void populate_default_backends(PipelineConfig& config);
+    static void populate_default_backends(PipelineConfig& config, const std::string& base_dir = "");
 };
 
 } // namespace condor

@@ -33,6 +33,9 @@ condor [OPTIONS] <pipeline.yaml>
 | `--dry-run` | None (Flag) | `false` | Validate YAML syntax, verify stage names, check for DAG cycles, evaluate conditions, print plan, and exit. |
 | `--no-interactive` | None (Flag) | `false` | Disable interactive stdin polling and ANSI progress bar redraws. Recommended for CI logs. |
 | `--verbose-logging`| None (Flag) | `false` | Enable detailed scheduler debug logging to stderr. |
+| `--list-backends`  | None (Flag) | None | Discover and list all available execution backends on the system and exit. |
+| `--warranty`       | None (Flag) | None | Display GNU General Public License warranty disclaimer and exit. |
+| `--license`        | None (Flag) | None | Display GNU General Public License redistribution conditions and exit. |
 | `-h`, `--help` | None (Flag) | None | Display command-line usage information and exit. |
 
 ---

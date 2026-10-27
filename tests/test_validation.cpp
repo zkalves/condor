@@ -20,6 +20,7 @@
 #include "condor/common.hpp"
 #include "condor/parser.hpp"
 #include "condor/menu.hpp"
+#include "condor/backend.hpp"
 #include <sstream>
 
 extern void register_test(const std::string& name, std::function<void()> func);
@@ -213,4 +214,82 @@ TEST_CASE(gpl_conditions_text) {
     ASSERT_TRUE(text.find("4. Conveying Verbatim Copies.") != std::string::npos);
     ASSERT_TRUE(text.find("5. Conveying Modified Source Versions.") != std::string::npos);
     ASSERT_TRUE(text.find("GNU General Public License") != std::string::npos);
+}
+
+TEST_CASE(backend_registry_discovery) {
+    auto backends = BackendRegistry::discover_backends();
+    // Verify required grid backends are discovered from external definition files
+    ASSERT_TRUE(backends.find("slurm") != backends.end());
+    ASSERT_TRUE(backends.find("sge") != backends.end());
+    ASSERT_TRUE(backends.find("gridengine") != backends.end());
+    ASSERT_TRUE(backends.find("lsf") != backends.end());
+    ASSERT_TRUE(backends.find("pbs") != backends.end());
+    ASSERT_TRUE(backends.find("torque") != backends.end());
+    ASSERT_TRUE(backends.find("spark") != backends.end());
+}
+
+TEST_CASE(backend_load_custom_and_patterns) {
+    // 1. IBM Spectrum LSF
+    auto lsf = BackendRegistry::load_backend("lsf");
+    ASSERT_TRUE(lsf.has_value());
+    ASSERT_TRUE(lsf->name == "lsf");
+    ASSERT_TRUE(lsf->type == BackendType::TEMPLATE);
+    ASSERT_TRUE(lsf->submit_command.find("bsub") != std::string::npos);
+    ASSERT_TRUE(lsf->poll_command.find("bjobs") != std::string::npos);
+    ASSERT_TRUE(lsf->cancel_command.find("bkill") != std::string::npos);
+    ASSERT_TRUE(lsf->success_pattern == "DONE");
+
+    // 2. PBS Professional
+    auto pbs = BackendRegistry::load_backend("pbs");
+    ASSERT_TRUE(pbs.has_value());
+    ASSERT_TRUE(pbs->name == "pbs");
+    ASSERT_TRUE(pbs->submit_command.find("qsub") != std::string::npos);
+    ASSERT_TRUE(pbs->poll_command.find("qstat") != std::string::npos);
+    ASSERT_TRUE(pbs->cancel_command.find("qdel") != std::string::npos);
+
+    // 3. TORQUE Resource Manager
+    auto torque = BackendRegistry::load_backend("torque");
+    ASSERT_TRUE(torque.has_value());
+    ASSERT_TRUE(torque->name == "torque");
+
+    // 4. Apache Spark
+    auto spark = BackendRegistry::load_backend("spark");
+    ASSERT_TRUE(spark.has_value());
+    ASSERT_TRUE(spark->name == "spark");
+    ASSERT_TRUE(spark->submit_command.find("spark-submit") != std::string::npos);
+    ASSERT_TRUE(spark->poll_command.find("spark-submit") != std::string::npos);
+    ASSERT_TRUE(!spark->empty_poll_means_done);
+
+    // 5. Grid Engine Family (SGE / GridEngine)
+    auto sge = BackendRegistry::load_backend("sge");
+    ASSERT_TRUE(sge.has_value());
+    ASSERT_TRUE(sge->name == "sge");
+    ASSERT_TRUE(sge->submit_command.find("qsub -terse") != std::string::npos);
+
+    auto ge = BackendRegistry::load_backend("gridengine");
+    ASSERT_TRUE(ge.has_value());
+    ASSERT_TRUE(ge->name == "gridengine");
+
+    // 6. Slurm
+    auto slurm = BackendRegistry::load_backend("slurm");
+    ASSERT_TRUE(slurm.has_value());
+    ASSERT_TRUE(slurm->name == "slurm");
+    ASSERT_TRUE(slurm->submit_command.find("sbatch --parsable") != std::string::npos);
+}
+
+TEST_CASE(backend_job_id_regex_extraction) {
+    auto lsf_cfg = BackendRegistry::load_backend("lsf");
+    ASSERT_TRUE(lsf_cfg.has_value());
+    std::regex lsf_re(lsf_cfg->job_id_regex);
+    std::string lsf_sample = "Job <98765> is submitted to default queue <normal>.";
+    std::smatch m;
+    ASSERT_TRUE(std::regex_search(lsf_sample, m, lsf_re));
+    ASSERT_TRUE(m[1].str() == "98765");
+
+    auto spark_cfg = BackendRegistry::load_backend("spark");
+    ASSERT_TRUE(spark_cfg.has_value());
+    std::regex spark_re(spark_cfg->job_id_regex);
+    std::string spark_sample = "Driver successfully submitted as driver-20261027120000-0001";
+    ASSERT_TRUE(std::regex_search(spark_sample, m, spark_re));
+    ASSERT_TRUE(m[1].str() == "driver-20261027120000-0001");
 }

@@ -48,7 +48,7 @@ docs/
 - **Configurable Relative & Absolute Paths**: Support for either absolute host paths or portable relative run paths (`CONDOR_JOB_DIR=.`, `CONDOR_RUN_DIR=../..`, `BUILD_DIR=../../build/0001`), allowing run folders to be archived, relocated, or reproduced offline.
 - **Dynamic Terminal Width & Responsive Progress**: Real-time multi-bar ANSI progress visualizer with dynamic terminal width detection (`TIOCGWINSZ`), status summaries, and interactive keyboard menu (`p` pause, `r` resume, `k` kill, `q` quit).
 - **Self-Contained Interactive HTML Report**: Automatically generates an embedded, offline-ready `report.html` with per-stage tabbed navigation, stage progression bars, custom machine metrics parsing, embedded log inspectors, search, and deep-linking.
-- **Custom Template Backends**: Pluggable grid runner interface with parameter substitution (`{script}`, `{grid_id}`, `{job_dir}`) facilitating integration with Slurm (`sbatch`), Sun Grid Engine (`qsub`), LSF, or custom remote SSH/container executors.
+- **Extensible Distributed Grid Backends**: Dynamic, non-hardcoded grid execution system with parameterized command templates (`{script}`, `{grid_id}`, `{job_dir}`) and out-of-the-box definitions for Slurm (`sbatch`), Grid Engine Family (Sun Grid Engine / Altair / Open Grid Scheduler), IBM Spectrum LSF (`bsub`), PBS Professional & TORQUE (`qsub`), and Apache Spark (`spark-submit`). Discover all backends via `condor --list-backends`.
 
 ---
 

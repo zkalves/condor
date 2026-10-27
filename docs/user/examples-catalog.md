@@ -106,7 +106,7 @@ make run-failures
 
 ## 5. Custom Grid Backends (`examples/custom_backends/`)
 
-Demonstrates delegating compute jobs to external grid clusters (Slurm, SGE, LSF, Docker, Kubernetes):
+Demonstrates delegating compute jobs to external grid clusters (Slurm, Grid Engine Family, IBM Spectrum LSF, PBS Professional & TORQUE, Apache Spark, or custom runners):
 
 - **Pipeline File**: [`examples/custom_backends/scripts/pipeline.yaml`](file:///home/eze/projects/github/condor/examples/custom_backends/scripts/pipeline.yaml)
 - **Features Demonstrated**:

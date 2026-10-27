@@ -18,6 +18,7 @@
  */
 
 #include "condor/parser.hpp"
+#include "condor/backend.hpp"
 #include "condor/logging.hpp"
 #include <yaml-cpp/yaml.h>
 #include <fstream>
@@ -235,30 +236,22 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
     }
 }
 
-void YamlParser::populate_default_backends(PipelineConfig& config) {
-    // Built-in Local backend
+void YamlParser::populate_default_backends(PipelineConfig& config, const std::string& base_dir) {
+    // Built-in Local POSIX backend (only internal execution engine)
     BackendConfig local_b;
     local_b.name = "local";
     local_b.type = BackendType::LOCAL;
+    local_b.description = "Direct local POSIX process execution";
     config.backends["local"] = local_b;
 
-    // Built-in Slurm preset
-    BackendConfig slurm_b;
-    slurm_b.name = "slurm";
-    slurm_b.type = BackendType::TEMPLATE;
-    slurm_b.submit_command = "sbatch --parsable {script}";
-    slurm_b.poll_command = "squeue -j {grid_id} -h -o %T";
-    slurm_b.cancel_command = "scancel {grid_id}";
-    config.backends["slurm"] = slurm_b;
-
-    // Built-in SGE preset
-    BackendConfig sge_b;
-    sge_b.name = "sge";
-    sge_b.type = BackendType::TEMPLATE;
-    sge_b.submit_command = "qsub -terse {script}";
-    sge_b.poll_command = "qstat -j {grid_id}";
-    sge_b.cancel_command = "qdel {grid_id}";
-    config.backends["sge"] = sge_b;
+    // Discover external backend definition files dynamically from search paths
+    // (Grid engines such as Slurm, SGE/Grid Engine, IBM Spectrum LSF, PBS Pro, TORQUE, Apache Spark)
+    auto discovered = BackendRegistry::discover_backends(base_dir);
+    for (auto& [bname, bcfg] : discovered) {
+        if (config.backends.find(bname) == config.backends.end()) {
+            config.backends[bname] = std::move(bcfg);
+        }
+    }
 }
 
 PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std::string& base_dir) {
@@ -274,7 +267,7 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
     }
 
     PipelineConfig config;
-    populate_default_backends(config);
+    populate_default_backends(config, base_dir);
 
     if (!base_dir.empty()) {
         std::error_code ec;
@@ -379,9 +372,15 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
                 bconfig.type = BackendType::TEMPLATE;
             }
 
+            if (bnode["description"]) bconfig.description = bnode["description"].as<std::string>();
             if (bnode["submit_command"]) bconfig.submit_command = bnode["submit_command"].as<std::string>();
             if (bnode["poll_command"])   bconfig.poll_command   = bnode["poll_command"].as<std::string>();
             if (bnode["cancel_command"]) bconfig.cancel_command = bnode["cancel_command"].as<std::string>();
+            if (bnode["job_id_regex"])   bconfig.job_id_regex   = bnode["job_id_regex"].as<std::string>();
+            if (bnode["success_pattern"]) bconfig.success_pattern = bnode["success_pattern"].as<std::string>();
+            if (bnode["failure_pattern"]) bconfig.failure_pattern = bnode["failure_pattern"].as<std::string>();
+            if (bnode["running_pattern"]) bconfig.running_pattern = bnode["running_pattern"].as<std::string>();
+            if (bnode["empty_poll_means_done"]) bconfig.empty_poll_means_done = bnode["empty_poll_means_done"].as<bool>();
 
             config.backends[bname] = bconfig;
         }

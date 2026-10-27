@@ -125,6 +125,11 @@ install(DIRECTORY examples/
     PATTERN ".*" EXCLUDE
 )
 
+install(DIRECTORY res/backends/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/condor/backends
+    PATTERN ".*" EXCLUDE
+)
+
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
     "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
