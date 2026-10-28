@@ -21,15 +21,15 @@ concurrency:
 jobs:
   build-docs:
     name: Build Documentation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Doxygen and Graphviz
         run: |
-          sudo apt-get update
-          sudo apt-get install -y doxygen graphviz
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq doxygen graphviz
 
       - name: Build Doxygen Documentation
         run: |
@@ -46,9 +46,10 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-docs
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    continue-on-error: true
     steps:
       - name: Deploy to GitHub Pages
         id: deployment

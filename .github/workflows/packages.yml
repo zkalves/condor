@@ -13,7 +13,7 @@ permissions:
 jobs:
   package-deb:
     name: Package Debian (.deb)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -23,12 +23,14 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
             build-essential \
+            gcc-14 \
+            g++-14 \
             cmake \
             git \
             dpkg-dev
 
       - name: Configure CMake (Release)
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+        run: cmake -B build -S . -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 
       - name: Build Condor
         run: cmake --build build -j$(nproc)
@@ -53,29 +55,23 @@ jobs:
   package-rpm:
     name: Package Enterprise Linux (.rpm)
     runs-on: ubuntu-24.04
-    container:
-      image: almalinux:9
     steps:
-      - name: Install dependencies
-        run: |
-          dnf install -y epel-release dnf-plugins-core
-          dnf config-manager --set-enabled crb
-          dnf install -y --allowerasing \
-            gcc-c++ \
-            make \
-            cmake \
-            git \
-            rpm-build \
-            file
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure Git Safe Directory
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential \
+            gcc-14 \
+            g++-14 \
+            cmake \
+            git \
+            rpm
 
       - name: Configure CMake (Release)
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+        run: cmake -B build -S . -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 
       - name: Build Condor
         run: cmake --build build -j$(nproc)
@@ -109,11 +105,13 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
             build-essential \
+            gcc-14 \
+            g++-14 \
             cmake \
             git
 
       - name: Configure CMake (Release)
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+        run: cmake -B build -S . -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 
       - name: Build Condor
         run: cmake --build build -j$(nproc)
@@ -127,9 +125,10 @@ jobs:
         run: |
           ls -lh build/packages/*.tar.gz
           tar -tzf build/packages/*.tar.gz
-          mkdir /tmp/extract
-          tar -xzf build/packages/*.tar.gz -C /tmp/extract
+          mkdir -p /tmp/extract
+          tar -xzf build/packages/*.tar.gz --strip-components=1 -C /tmp/extract
           /tmp/extract/usr/bin/condor --help
+          /tmp/extract/usr/bin/condor --version
           /tmp/extract/usr/bin/condor --license
           /tmp/extract/usr/bin/condor --warranty
 

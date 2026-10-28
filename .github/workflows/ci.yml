@@ -9,11 +9,10 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   build:
-    name: Build Project
+    name: Build & Verify
     runs-on: ubuntu-24.04
 
     steps:
@@ -33,39 +32,22 @@ jobs:
       - name: Configure CMake
         run: cmake -B build -S . -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 
-      - name: Build
+      - name: Build Condor
         run: cmake --build build -j$(nproc)
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifact
-          path: build/
-          include-hidden-files: true
-
-  test-unit:
-    name: Unit & Integration Tests
-    needs: build
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: build-artifact
-          path: build/
-
-      - name: Restore Executable Permissions
-        run: chmod +x build/condor build/condor_tests || true
-
-      - name: Run Test Suite
+      - name: Run Test Suite (Direct)
         run: ./build/condor_tests
 
       - name: Run CTest Verification
         run: ctest --test-dir build --output-on-failure
+
+      - name: Upload Binaries Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: condor-binaries
+          path: |
+            build/condor
+            build/condor_tests
 
   test-examples:
     name: Test Example (${{ matrix.example }})
@@ -88,14 +70,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download build artifact
+      - name: Download Binaries
         uses: actions/download-artifact@v4
         with:
-          name: build-artifact
-          path: build/
+          name: condor-binaries
+          path: build
 
       - name: Restore Executable Permissions
-        run: chmod +x build/condor || true
+        run: chmod +x build/condor
 
       - name: Run Example Flow
         run: |

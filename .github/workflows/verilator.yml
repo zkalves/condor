@@ -11,45 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  build-verilator:
-    name: Prepare Verilator 5.052
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Cache Verilator 5.052
-        id: cache-verilator
-        uses: actions/cache@v4
-        with:
-          path: /home/runner/verilator-5.052
-          key: verilator-5.052-${{ runner.os }}
-
-      - name: Install & Compile Verilator 5.052
-        if: steps.cache-verilator.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            git help2man perl python3 make autoconf g++ flex bison ccache \
-            libfl2 libfl-dev zlib1g zlib1g-dev liblz4-dev
-          git clone --depth 1 --branch v5.052 https://github.com/verilator/verilator.git /tmp/verilator
-          cd /tmp/verilator
-          autoconf
-          ./configure --prefix=/home/runner/verilator-5.052
-          make -j$(nproc)
-          make install
-          rm -rf /tmp/verilator
-
-      - name: Package Verilator
-        run: tar -czf /tmp/verilator-5.052.tar.gz -C /home/runner verilator-5.052
-
-      - name: Upload Verilator artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: verilator-artifact
-          path: /tmp/verilator-5.052.tar.gz
-
   test-verilator:
     name: Verilator ALU Simulation (${{ matrix.mode }})
-    needs: build-verilator
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -66,7 +29,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install Verilator and Dependencies
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
@@ -75,27 +38,19 @@ jobs:
             g++-14 \
             cmake \
             git \
+            verilator \
             perl \
             python3 \
             zlib1g-dev \
             libfl2 \
             libfl-dev
 
-      - name: Download Verilator artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: verilator-artifact
-          path: /tmp
-
-      - name: Extract Verilator and Add to PATH
-        run: |
-          tar -xzf /tmp/verilator-5.052.tar.gz -C /home/runner
-          echo "/home/runner/verilator-5.052/bin" >> $GITHUB_PATH
-          /home/runner/verilator-5.052/bin/verilator --version
+      - name: Verify Verilator Installation
+        run: verilator --version
 
       - name: Build Condor
         run: |
-          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -S . -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j$(nproc)
 
       - name: Execute Verilator Pipeline (${{ matrix.mode }})

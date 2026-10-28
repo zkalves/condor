@@ -22,6 +22,7 @@ jobs:
   release-please:
     name: Automated Release & Semantic Versioning
     runs-on: ubuntu-24.04
+    continue-on-error: true
     steps:
       - name: Run Release Please
         uses: googleapis/release-please-action@v4
