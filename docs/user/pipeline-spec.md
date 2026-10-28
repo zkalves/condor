@@ -4,85 +4,504 @@ The Condor pipeline configuration file is a declarative YAML document defining e
 
 ---
 
-## Top-Level Schema
+## Top-Level Master Schema
+
+Below is the generic master YAML template illustrating every supported section, property, and hierarchy level in Condor. Placeholders formatted as `<...>` indicate values you customize; allowed values, defaults, and usage details are summarized in the inline comments and detailed in the reference tables below:
 
 ```yaml
-name: <string>                  # Pipeline identifier (required)
+# yaml-language-server: $schema=res/schema/condor-pipeline-schema.json
+# ==============================================================================
+# Condor Pipeline Configuration - Generic Master Template
+# ==============================================================================
 
-variables:                      # Global variable declarations
-  <KEY>: <VALUE>
+# Pipeline project name (optional, string, default: "pipeline")
+name: "<pipeline_name>"
 
-settings:                       # Execution and scheduler settings
-  max_parallel_jobs: <int>
-  base_output_dir: <path>
-  on_failure_action: <string>
-  exit_zero_on_failure: <bool>
-  status_interval_sec: <int>
-  output_mode: <string>
-  path_style: <string>
-  backend: <string>             # Pipeline execution backend ("local", "slurm", "lsf", "sge", etc.)
+# Top-level external YAML file inclusion (optional: single path string OR sequence of paths)
+# Single file:    include: "<path/to/included_file.yaml>"
+# Multiple files: include: ["<path_1.yaml>", "<path_2.yaml>"]
+include: "<path/to/included_file.yaml>"
 
-defaults:                       # Unified defaults hierarchy
-  stage:                        # Inherited by all stage boundaries
+# Global application-independent variables (optional, mapping of string -> string/number/bool)
+# Interpolated via ${KEY} in commands, args, and hooks; exported as CONDOR_VAR_<KEY>
+variables:
+  <VAR_NAME_1>: "<string_value>"
+  <VAR_NAME_2>: <number_or_boolean>
+
+# Execution engine and runtime scheduler settings (optional, mapping)
+settings:
+  max_parallel_jobs: <int>           # Max concurrent slots (0 = auto CPU cores; default: 0)
+  base_output_dir: "<path>"          # Base folder for timestamped run directories (default: "./condor_runs")
+  run_dir: "<path>"                  # Fixed output directory override (disables timestamping)
+  on_failure_action: "<action>"      # "abort" (default) | "continue" | "stage_barrier"
+  exit_zero_on_failure: <bool>       # true | false (default: false)
+  status_interval_sec: <int>         # Periodic status dump interval in seconds (default: 30)
+  backend: "<backend_name>"          # "local" (default) | "slurm" | "lsf" | "sge" | "pbs" | etc.
+  output_mode: "<mode>"              # "all" (default) | "failures" | "summary"
+  path_style: "<style>"              # "absolute" (default) | "relative"
+  dry_run: <bool>                    # true | false (default: false)
+  no_interactive: <bool>             # true | false (default: false)
+  verbose_logging: <bool>            # true | false (default: false)
+  count_multiplier: <int>            # Multiplier for scalable job counts (default: 1)
+
+# Global pipeline lifecycle hooks (optional, mapping)
+# Runs once before the first stage starts and after all stages conclude
+hooks:
+  # Hook commands: supports single string command OR sequence of string commands
+  # Single command:  pre: "<command>"
+  # Multiple (list): pre: ["<cmd_1>", "<cmd_2>"]
+  pre: "<command>"
+  post: "<command>"
+  always: <bool>                     # true (runs even on failure) | false (default: false)
+  allow_failure: <bool>              # true (errors ignored) | false (default: false)
+
+# Unified hierarchical defaults (optional, mapping)
+defaults:
+  # Defaults inherited by all stages across the pipeline
+  stage:
     hooks:
-      pre: <commands>
-      post: <commands>
+      pre: "<command>"               # Command(s) executed before stage starts (string or sequence)
+      post: "<command>"              # Command(s) executed after stage finishes (string or sequence)
+      always: <bool>                 # true | false (default: false)
+      allow_failure: <bool>          # true | false (default: false)
+
+  # Defaults inherited by all jobs across the pipeline
+  job:
+    command: "<command>"             # Fallback command line for jobs
+    args: "<args>"                   # Fallback arguments appended to command
+    append_args: <bool>              # true (appends args) | false (default: false, overrides)
+    scalable: <bool>                 # true (default, scales with count multiplier) | false (pinned count)
+    variables:                       # Default job variables
+      <VAR_NAME>: "<value>"
+    hooks:                           # Default job lifecycle hooks (pre/post accept string or sequence)
+      pre: "<command>"
+      post: "<command>"
       always: <bool>
       allow_failure: <bool>
-  job:                          # Inherited by all jobs across the pipeline
-    command: <string>
-    args: <string>
-    variables:
-      <KEY>: <VALUE>
-    hooks:
-      pre: <commands>
-      post: <commands>
-      always: <bool>
-      allow_failure: <bool>
 
-backends:                       # Custom execution backends (e.g. Slurm, SGE, LSF)
-  <backend_name>:
-    type: template
-    submit_command: <string>
-    poll_command: <string>
-    cancel_command: <string>
+# Custom template execution backends (optional, mapping of backend_name -> backend_config)
+backends:
+  <custom_backend_name>:
+    type: "<type>"                   # "template" (default) | "local"
+    description: "<description>"     # Human-readable backend description
+    submit_command: "<command>"      # Submission template (e.g. "sbatch --parsable {script}")
+    poll_command: "<command>"        # Status query template (e.g. "squeue -h -j {grid_id}")
+    cancel_command: "<command>"      # Cancellation template (e.g. "scancel {grid_id}")
+    job_id_regex: "<regex>"          # Regex capturing remote cluster job ID from submit output
+    success_pattern: "<regex>"       # Regex matching successful job state
+    failure_pattern: "<regex>"       # Regex matching failed job state
+    running_pattern: "<regex>"       # Regex matching active/pending job state
+    empty_poll_means_done: <bool>    # true (default) | false
 
-hooks:                          # Global pipeline lifecycle hooks
-  pre: <commands>
-  post: <commands>
-  always: <bool>
-  allow_failure: <bool>
-
-stages:                         # List of pipeline execution stages
-  - name: <string>
-    depends_on: [<stage_name>, ...]
-    enabled_if: <expression>
-    allow_failure: <bool>
-    include: <path>             # Modular external job suite
+# List of stages in the DAG (REQUIRED, sequence of StageConfig, minItems: 1)
+stages:
+  - name: "<stage_name>"             # (REQUIRED) POSIX-safe identifier (^[a-zA-Z0-9_-]+$)
+    enabled_if: "<expression>"       # (Optional) Condition expression (e.g. "${VAR} == 'value'")
+    allow_failure: <bool>            # (Optional) true | false (default: false)
+    # Stage dependencies (optional: single stage string OR sequence of stages)
+    # Single dependency:   depends_on: "<prerequisite_stage>"
+    # Sequence of stages:  depends_on: ["<stage_1>", "<stage_2>"]
+    depends_on:
+      - "<prerequisite_stage_1>"
+      - "<prerequisite_stage_2>"
+    # Stage-scoped job defaults (optional: configures command, args, hooks for jobs in this stage)
     defaults:
-      ...
-    jobs:
-      - name: <string>
-        ...
+      command: "<command>"           # Default command for jobs in this stage (overrides defaults.job.command)
+      args: "<args>"                 # Stage arguments (appended if append_args: true; overrides if false)
+      append_args: <bool>            # true (appends to pipeline args) | false (default: false, overrides)
+      scalable: <bool>               # true (default) | false (pinned count)
+      variables:
+        <VAR_NAME>: "<value>"
+      hooks:
+        pre: "<command>"
+        post: "<command>"
+        always: <bool>
+        allow_failure: <bool>
+    # Stage modular job inclusion (optional: single path string OR sequence of paths)
+    # Single file:    include: "<path/to/jobs.yaml>"
+    # Multiple files: include: ["<jobs_1.yaml>", "<jobs_2.yaml>"]
+    include: "<path/to/stage_jobs.yaml>"
+    hooks:                           # (Optional) Stage-level lifecycle hooks (pre/post accept string or sequence)
+      pre: "<command>"
+      post: "<command>"
+      always: <bool>
+      allow_failure: <bool>
+    jobs:                            # Sequence of jobs executed in this stage (or provided via include)
+      - name: "<job_name>"           # (Optional) Job name (default: "job_<job_id>")
+        command: "<command>"         # (Optional) Shell command line to execute (inherits stage/pipeline defaults)
+        args: "<args>"               # (Optional) Arguments (appends to defaults if append_args: true; overrides if false)
+        append_args: <bool>          # (Optional) true (appends to inherited args) | false (overrides args)
+        enabled_if: "<expression>"   # (Optional) Job-level condition expression
+        allow_failure: <bool>        # (Optional) true | false (default: false)
+        # Job dependencies (optional: single string ID OR sequence of IDs)
+        # Single dependency:   depends_on: "<job_id>"
+        # Sequence of IDs:     depends_on: ["<job_1>", "<stage/job_2>"]
+        depends_on:
+          - "<job_id>"               # Intra-stage ID, e.g. "0001"
+          - "<stage_name/job_id>"    # Cross-stage reference, e.g. "stage_a/0002"
+        hooks:                       # (Optional) Job-level lifecycle hooks (pre/post accept string or sequence)
+          pre: "<command>"
+          post: "<command>"
+          always: <bool>
+          allow_failure: <bool>
+        variables:                   # (Optional) Job-scoped variables
+          <VAR_NAME>: "<value>"
+        count: <int>                 # (Optional) Replicates job N times with index ${INDEX} (>= 1)
+        scalable: <bool>             # (Optional) true (default: scales with CLI multiplier) | false (pinned count)
+        # Matrix parameter sweep (optional: mapping of variable names to lists of values; generates Cartesian product)
+        matrix:
+          <VAR_NAME_1>: ["<val_1>", "<val_2>"]
+          <VAR_NAME_2>: [<number_1>, <number_2>]
+        # Modular job inclusion (optional: single path string OR sequence of paths)
+        # Single file:    include: "<path/to/suite.yaml>"
+        # Multiple files: include: ["<suite_1.yaml>", "<suite_2.yaml>"]
+        include: "<path/to/job_suite.yaml>"
 ```
 
 ---
 
-## 1. Settings Section (settings:)
+## Option Value Formats: Lists, Maps & Single Arguments
 
-Configure pipeline-wide runtime behavior:
+Every property in the Condor pipeline specification falls into one of four distinct structural formats:
+
+1. **Dual-Format Options** (accepts either a single value OR a list of values)
+2. **Lists Only** (strictly YAML sequences)
+3. **Maps Only** (strictly key-value mappings / dictionaries)
+4. **Single Arguments Only** (strictly scalar values: strings, numbers, or booleans)
+
+### Structural Cardinality Reference Table
+
+| Configuration Property | YAML Path / Location | Structural Format | Allowed YAML Shapes |
+| :--- | :--- | :--- | :--- |
+| `include` | `include`, `stages[].include`, `jobs[].include` | **Single Value OR List** | Single file path string OR sequence of path strings |
+| `depends_on` | `stages[].depends_on`, `jobs[].depends_on` | **Single Value OR List** | Single identifier string OR sequence of identifier strings |
+| `pre` / `post` | `hooks.pre`, `hooks.post`, `*.hooks.pre`, `*.hooks.post` | **Single Value OR List** | Single command string OR sequence of command strings |
+| `stages` | `stages` | **List Only** | Sequence of stage mapping objects (`minItems: 1`) |
+| `jobs` | `stages[].jobs`, included job files | **List Only** | Sequence of job mapping objects |
+| `variables` | `variables`, `*.variables` | **Map Only** | Key-value dictionary of string keys to scalar values |
+| `matrix` | `jobs[].matrix` | **Map Only** | Dictionary mapping variable names to lists of values for parameter sweeps |
+| `settings` | `settings` | **Map Only** | Dictionary of runtime execution settings |
+| `defaults` | `defaults`, `stages[].defaults` | **Map Only** | Dictionary of stage/job defaults (`command`, `args`, `append_args`, `scalable`, `variables`, `hooks`) |
+| `backends` | `backends` | **Map Only** | Dictionary of `<backend_name>:` to backend template objects |
+| `hooks` | `hooks`, `*.hooks` | **Map Only** | Dictionary containing `pre`, `post`, `always`, `allow_failure` |
+| `name` | `name`, `stages[].name`, `jobs[].name` | **Single Argument Only** | Single string identifier |
+| `command` | `jobs[].command`, `stages[].defaults.command`, `defaults.job.command` | **Single Argument Only** | Single shell command line string |
+| `args` | `jobs[].args`, `stages[].defaults.args`, `defaults.job.args` | **Single Argument Only** | Single argument line string |
+| `append_args` | `jobs[].append_args`, `stages[].defaults.append_args`, `defaults.job.append_args` | **Single Argument Only** | Single boolean (`true` or `false`) |
+| `scalable` | `jobs[].scalable`, `stages[].defaults.scalable`, `defaults.job.scalable` | **Single Argument Only** | Single boolean (`true` or `false`) |
+| `enabled_if` | `stages[].enabled_if`, `jobs[].enabled_if` | **Single Argument Only** | Single expression string |
+| `count` | `jobs[].count` | **Single Argument Only** | Single positive integer (`>= 1`) |
+| `count_multiplier` | `settings.count_multiplier` | **Single Argument Only** | Single positive integer (`>= 1`) |
+| `allow_failure` | `stages[].allow_failure`, `jobs[].allow_failure`, `hooks.allow_failure` | **Single Argument Only** | Single boolean (`true` or `false`) |
+| `always` | `hooks.always` | **Single Argument Only** | Single boolean (`true` or `false`) |
+| `backend` | `settings.backend` | **Single Argument Only** | Single string identifying a registered backend |
+| `output_mode` | `settings.output_mode` | **Single Argument Only** | Single enum string: `"all"`, `"failures"`, `"summary"` |
+| `path_style` | `settings.path_style` | **Single Argument Only** | Single enum string: `"absolute"`, `"relative"` |
+| `max_parallel_jobs`| `settings.max_parallel_jobs` | **Single Argument Only** | Single non-negative integer (`>= 0`) |
+| `status_interval_sec`| `settings.status_interval_sec` | **Single Argument Only** | Single positive integer (`>= 1`) |
+| `base_output_dir` | `settings.base_output_dir` | **Single Argument Only** | Single filesystem path string |
+| `run_dir` | `settings.run_dir` | **Single Argument Only** | Single filesystem path string |
+| `on_failure_action`| `settings.on_failure_action` | **Single Argument Only** | Single enum string: `"abort"`, `"continue"`, `"stage_barrier"` |
+| `exit_zero_on_failure`| `settings.exit_zero_on_failure` | **Single Argument Only** | Single boolean (`true` or `false`) |
+| `dry_run` | `settings.dry_run` | **Single Argument Only** | Single boolean (`true` or `false`) |
+| `no_interactive` | `settings.no_interactive` | **Single Argument Only** | Single boolean (`true` or `false`) |
+| `verbose_logging` | `settings.verbose_logging` | **Single Argument Only** | Single boolean (`true` or `false`) |
+| Backend properties | `backends.<name>.*` | **Single Argument Only** | Single template strings or booleans (`submit_command`, `poll_command`, `cancel_command`, etc.) |
+
+---
+
+### 1. Dual-Format Options: Single Value vs. List Syntaxes
+
+The following 3 properties natively accept **either** a single argument or a list (in both block bullet `- ` style and inline flow `[...]` style):
+
+#### A. `include` (Root, Stage, and Job levels)
+Use a single string to include one file, or a list to include multiple files:
 
 ```yaml
-settings:
-  max_parallel_jobs: 8          # Max concurrent worker slots (default: CPU cores)
-  base_output_dir: "./runs"     # Output root for timestamped folders (default: ./condor_runs)
-  on_failure_action: "abort"    # "abort", "continue", or "stage_barrier"
-  exit_zero_on_failure: false   # Return 0 even if failures occur (useful for CI)
-  status_interval_sec: 15       # CI mode status dump period in seconds
-  output_mode: "all"            # "all", "failures", or "summary"
-  path_style: "relative"        # "relative" (portable) or "absolute" (host paths)
-  backend: "local"              # Pipeline execution backend ("local", "slurm", "lsf", "sge", etc.)
+# 1. Single file argument:
+include: "backends.yaml"
+
+# 2. List of files (bulleted block style):
+include:
+  - "variables.yaml"
+  - "backends.yaml"
+  - "common_stages.yaml"
+
+# 3. List of files (inline flow style):
+include: ["variables.yaml", "backends.yaml", "common_stages.yaml"]
 ```
+
+#### B. `depends_on` (Stage and Job levels)
+Use a single string to depend on one stage/job, or a list to declare multiple prerequisites:
+
+```yaml
+# Stage dependency: single prerequisite
+stages:
+  - name: test
+    depends_on: compile   # or "compile"
+
+# Stage dependency: multiple prerequisites
+stages:
+  - name: package
+    depends_on:
+      - lint
+      - unit_tests
+      - integration_tests
+    # Or inline: depends_on: [lint, unit_tests, integration_tests]
+
+# Job dependency: single intra-stage ID
+jobs:
+  - name: step_b
+    depends_on: "0001"
+
+# Job dependency: multiple prerequisites (combining intra-stage and cross-stage)
+jobs:
+  - name: probe_service
+    depends_on:
+      - "0001"
+      - "setup_stage/0002"
+    # Or inline: depends_on: ["0001", "setup_stage/0002"]
+```
+
+#### C. `pre` and `post` Lifecycle Hooks
+Use a single string command, or a list of shell commands executed sequentially:
+
+```yaml
+hooks:
+  # 1. Single command string:
+  pre: "echo 'Starting pipeline run'"
+
+  # 2. Sequence of shell commands (executed one after another in order):
+  post:
+    - "echo 'Collecting test artifacts...'"
+    - "tar -czf artifacts.tar.gz ./condor_runs/latest"
+    - "./scripts/notify_slack.sh --status=${CONDOR_PIPELINE_STATUS}"
+
+  # 3. Sequence in inline flow style:
+  # pre: ["mkdir -p build", "cd build && cmake .."]
+```
+
+#### D. `seeds` (Job level)
+Use a single integer for a single run seed, or a list of integers to trigger a parameter sweep:
+
+```yaml
+# 1. Single seed argument:
+jobs:
+  - name: test_monte_carlo
+    seeds: 42   # Or use singular: seed: 42
+
+# 2. Multi-seed parameter sweep (generates test_sim_seed_100, test_sim_seed_200, test_sim_seed_300):
+jobs:
+  - name: test_sim
+    seeds:
+      - 100
+      - 200
+      - 300
+    # Or inline flow style:
+    # seeds: [100, 200, 300]
+```
+
+---
+
+### 2. Lists Only (Sequences)
+
+The following properties **must always be written as YAML sequences** (`- item` or `[item1, item2]`):
+
+- **`stages:`**: Sequence of stage objects (must contain at least one stage).
+  ```yaml
+  stages:
+    - name: build
+      jobs:
+        - name: compile
+          command: "make build"
+    - name: test
+      jobs:
+        - name: unit_tests
+          command: "make test"
+  ```
+- **`jobs:`**: Sequence of job objects under a stage or within an included job file.
+  ```yaml
+  jobs:
+    - name: unit_tests
+      command: "./run_unit"
+    - name: e2e_tests
+      command: "./run_e2e"
+  ```
+
+---
+
+### 3. Maps Only (Key-Value Dictionaries)
+
+The following properties **must always be written as YAML key-value mappings** (`key: value`):
+
+- **`variables:`**: Key-value pairs of variable names to string, number, or boolean values.
+- **`settings:`**: Key-value pairs of pipeline execution options.
+- **`defaults:`**: Key-value mapping containing `stage:` and/or `job:` default sections.
+- **`backends:`**: Key-value mapping of custom backend names to their definition blocks.
+- **`hooks:`**: Key-value mapping containing hook configuration (`pre`, `post`, `always`, `allow_failure`).
+
+---
+
+### 4. Single Arguments Only (Scalars)
+
+All other properties accept **strictly a single scalar value** (string, integer, or boolean):
+
+- **Single Shell Commands**: `command` and `args` accept a single string, passed directly to the POSIX shell (`/bin/sh -c`). They do not accept lists of tokens; separate arguments with spaces inside the string (e.g. `args: "--verbose --threads=4"`).
+- **Conditionals**: `enabled_if` accepts a single expression string evaluated by the expression engine (e.g. `enabled_if: "${coverage} == '1'"`).
+- **Job Scaling**: `count` accepts a single integer `>= 1` (e.g. `count: 8`); `scalable` accepts a boolean (`true` or `false`).
+- **Flags**: `allow_failure`, `always`, `exit_zero_on_failure`, `dry_run`, `no_interactive`, `verbose_logging` accept a single boolean literal (`true` or `false`).
+
+---
+
+## Complete Configuration Reference Tables
+
+### 1. Root-Level Options
+
+| Key | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `name` | string | Optional | `"pipeline"` | Unique project/workflow identifier displayed in summaries and reports. |
+| `stages` | sequence of stages | **Required** | &mdash; | Ordered list of execution stage definitions in the DAG (minimum: 1). |
+| `variables` | map | Optional | `{}` | Global key-value dictionary interpolated as `${KEY}` and exported to child environments. |
+| `settings` | map | Optional | `{}` | Pipeline-wide execution options, scheduler controls, and backend configuration. |
+| `defaults` | map | Optional | `{}` | Unified hierarchical defaults inherited by all stages (`defaults.stage`) and jobs (`defaults.job`). |
+| `backends` | map | Optional | `{}` | Custom execution backend templates (e.g. Slurm, SGE, LSF, PBS, Spark). |
+| `hooks` | map | Optional | `{}` | Global pipeline lifecycle hooks executed at the pipeline boundary. |
+| `include` | string or sequence of strings | Optional | `[]` | External YAML files included into the root configuration scope. |
+
+---
+
+### 2. Execution Settings (`settings:`)
+
+| Key | Type | Default | Allowed Values | Description | CLI Equivalent |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `max_parallel_jobs` | integer | `0` (CPU cores) | `0..N` | Maximum concurrent job execution slots. `0` auto-detects hardware concurrency. | `--max-parallel-jobs <N>` |
+| `base_output_dir` | string | `"./condor_runs"` | Any path | Directory where timestamped run directories (`YYYYMMDD_HHMMSS_XXXXXX`) are created. | `--base-output-dir <path>` |
+| `run_dir` | string | `""` | Any path | Overrides timestamping to execute directly inside an explicit fixed folder. | `--run-dir <path>` |
+| `on_failure_action`| string | `"abort"` | `abort`, `continue`, `stage_barrier` | Failure policy when a job fails: abort immediately, continue independent branches, or barrier at stage. | `--on-failure-action <mode>` |
+| `exit_zero_on_failure`| boolean | `false` | `true`, `false` | If `true`, Condor exits with return code `0` even if jobs or stages failed (ideal for CI pipelines). | `--exit-zero-on-failure` |
+| `status_interval_sec` | integer | `30` | `1..N` | Seconds between periodic timestamped progress dumps in non-interactive / CI mode. | `--status-interval-sec <N>` |
+| `backend` | string | `"local"` | Any registered backend | Execution backend identifier (`local`, `slurm`, `lsf`, `sge`, `gridengine`, `pbs`, `torque`, `spark`). | `-b`, `--backend <name>` |
+| `output_mode` | string | `"all"` | `all`, `failures`, `summary` | Terminal output verbosity: `all` (full events), `failures` (only failing jobs and errors), `summary` (clean tracker). | `--output-mode <mode>` |
+| `path_style` | string | `"absolute"` | `absolute`, `relative` | Path representation exported to child environments and log metadata. | `--path-style <mode>` |
+| `dry_run` | boolean | `false` | `true`, `false` | If `true`, validates syntax, DAG dependencies, prints the execution plan, and exits without running jobs. | `--dry-run` |
+| `no_interactive` | boolean | `false` | `true`, `false` | Disables raw ANSI terminal redraws and interactive menu polling for headless CI/CD runners. | `--no-interactive` |
+| `verbose_logging`| boolean | `false` | `true`, `false` | Enables detailed internal scheduler state machine transitions and debugging logs. | `--verbose-logging` |
+
+---
+
+### 3. Stage Definition (`stages:[]`)
+
+| Key | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `name` | string | **Required** | &mdash; | Stage identifier. Must match POSIX-safe regex `^[a-zA-Z0-9_-]+$`. |
+| `enabled_if` | string | Optional | `""` | Conditional evaluation expression (e.g. `"${coverage} == '1'"`). If false, stage is skipped. |
+| `allow_failure`| boolean | Optional | `false` | If `true`, failures in this stage do not fail the overall pipeline or trigger abort policies. |
+| `depends_on` | string or sequence of strings | Optional | `[]` | List of prerequisite stage names that must pass or be skipped before this stage starts. |
+| `hooks` | map | Optional | `{}` | Stage-level lifecycle hooks (`pre`, `post`, `always`, `allow_failure`). |
+| `include` | string or sequence of strings | Optional | `[]` | External YAML file(s) containing job definitions to execute in this stage. |
+| `jobs` | sequence of jobs | Optional | `[]` | Sequence of job definitions configured directly in this stage. |
+
+---
+
+### 4. Job Definition (`jobs:[]`)
+
+| Key | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `name` | string | Optional | `"job_<id>"` | Descriptive human-readable job name. Used as `${CONDOR_JOB_NAME}` and `${TEST_NAME}`. |
+| `command` | string | Optional | Inherited | Shell command line executed by worker slots. Inherited from global `defaults.job.command`. |
+| `args` | string | Optional | Inherited | Arguments appended to the command line or exposed as `${ARGS}`. |
+| `enabled_if` | string | Optional | `""` | Job-level conditional expression. If false, job is marked `SKIPPED`. |
+| `allow_failure`| boolean | Optional | `false` | If `true`, non-zero return code is marked `FAILED_ALLOWED` and does not trigger abort policies. |
+| `depends_on` | string or sequence of strings | Optional | `[]` | Dependency references: Intra-stage job ID (`"0001"`), cross-stage key (`"stage/0002"`), or stage name. |
+| `hooks` | map | Optional | Inherited | Job-level lifecycle hooks wrapping the primary command (`pre`, `post`, `always`, `allow_failure`). |
+| `variables` | map | Optional | `{}` | Scoped variables exposed as `${KEY}` in command/hooks and exported to environment. |
+| `count` | integer | Optional | `1` | Test scaling replication count (`>= 1`). Generates `N` replicated jobs (`<name>_0`, `<name>_1`, ...). |
+| `seed` | integer | Optional | &mdash; | Explicit pseudo-random seed assigned to this job instance. Injected as `${SEED}`. |
+| `seeds` | integer or sequence of integers | Optional | `[]` | Explicit list of seeds for parameter sweeps. Generates `<name>_seed_<val>` per item. |
+| `include` | string or sequence of strings | Optional | `[]` | Path or list of paths to external YAML files containing jobs to expand into this position. |
+
+> [!NOTE]
+> **Mutual Exclusivity**: A job cannot declare both `count` and `seed`/`seeds`.
+
+---
+
+### 5. Lifecycle Hooks (`HookConfig`)
+
+Hooks can be configured at:
+- **Pipeline Level**: `hooks:`
+- **Global Stage Defaults**: `defaults.stage.hooks:`
+- **Global Job Defaults**: `defaults.job.hooks:`
+- **Stage Level**: `stages[].hooks:`
+- **Job Level**: `jobs[].hooks:`
+
+| Key | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `pre` | string or sequence of shell commands | `""` | Command or list of shell commands executed sequentially before the entity starts. |
+| `post` | string or sequence of shell commands | `""` | Command or list of shell commands executed sequentially after the entity concludes. |
+| `always` | boolean | `false` | For post-hooks: If `true`, executes even if prior steps, commands, or jobs failed. |
+| `allow_failure` | boolean | `false` | If `true`, a non-zero exit code from the hook logs a warning without failing the job, stage, or pipeline. |
+
+---
+
+### 6. Execution Backends (`backends:`)
+
+| Key | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `type` | string | Optional | `"template"` | Backend execution type: `"local"` (direct POSIX fork/exec) or `"template"` (grid runners). |
+| `description` | string | Optional | `""` | Human-readable description displayed when querying `condor --list-backends`. |
+| `submit_command`| string | **Required** | &mdash; | Command template executed to submit a job to the cluster (placeholders: `{script}`, `{job_id}`, etc.). |
+| `poll_command` | string | **Required** | &mdash; | Command template executed to poll a submitted job's status (placeholder: `{grid_id}`). |
+| `cancel_command`| string | **Required** | &mdash; | Command template executed to cancel or kill a running job (placeholder: `{grid_id}`). |
+| `job_id_regex` | string | Optional | `""` | Regex extracting the remote cluster job ID from submit output. Defaults to first token. |
+| `success_pattern`| string | Optional | Auto-detect | Regex matching job completion (e.g. `COMPLETED|DONE|FINISHED`). |
+| `failure_pattern`| string | Optional | Auto-detect | Regex matching job failure (e.g. `FAILED|CANCELLED|TIMEOUT|EXIT`). |
+| `running_pattern`| string | Optional | Auto-detect | Regex matching active jobs (e.g. `RUNNING|PENDING|RUN|PEND|QUEUED`). |
+| `empty_poll_means_done` | boolean | Optional | `true` | If `true`, empty poll output signifies that the job finished and cleared the queue. |
+
+#### Backend Template Placeholders
+- `{script}`: Full path to generated `job_runner.sh` script
+- `{grid_id}`: Remote cluster job ID returned by submit command
+- `{job_id}`: Sequential 4-digit job identifier (`0001`, `0002`, ...)
+- `{job_name}`: Human-readable job name
+- `{job_dir}`: Per-job dedicated output directory
+- `{stage_name}`: Parent stage name
+- `{stage_dir}`: Stage directory path
+- `{run_dir}`: Active run root directory
+- `${VAR}`: Any pipeline or host environment variable (e.g. `${QUEUE}`, `${SLURM_PARTITION}`)
+
+---
+
+### 7. Declarative JSON Schema & IDE Integration
+
+Condor embeds a compiled [JSON Schema](https://json-schema.org/) Draft 7 specification into every build and installs it to:
+```text
+<PREFIX>/share/condor/schema/condor-pipeline-schema.json
+```
+The repository source is located at [`res/schema/condor-pipeline-schema.json`](file:///home/eze/projects/github/condor/res/schema/condor-pipeline-schema.json).
+
+#### IDE Autocomplete, Tooltips & Real-Time Linting
+Add the `$schema` directive modeline to the very top of your pipeline YAML file:
+
+```yaml
+# yaml-language-server: $schema=res/schema/condor-pipeline-schema.json
+name: sample_pipeline
+settings:
+  max_parallel_jobs: 4
+stages:
+  - name: build
+    jobs:
+      - name: compile
+        command: "make build"
+```
+
+* **VS Code**: Supported natively via the **Red Hat YAML** extension (`redhat.vscode-yaml`). Provides hover documentation, type checking, autocomplete for all properties and enums, and red-squiggle error highlighting.
+* **Neovim**: Supported natively with `yamlls` (YAML Language Server).
+* **JetBrains (CLion / PyCharm / IntelliJ)**: Automatically recognizes the `$schema` modeline or can be associated under **Settings &rarr; Languages & Frameworks &rarr; Schemas and DTDs &rarr; JSON Schema Mappings**.
+
+#### In-Process Validation
+During pipeline load (`condor run` or `condor --dry-run`), Condor evaluates the YAML document against the embedded schema before building the DAG. Any syntax error, misspelled property (e.g. `commnd: ...`), invalid enum value, or forbidden key generates an immediate `ConfigurationError` with exact JSON pointer paths and reasons.
+
+---
 
 ---
 
@@ -115,22 +534,29 @@ Stages execute in topological order according to their declared `depends_on:` li
 ```yaml
 stages:
   - name: compile
-    command: "make build"
+    jobs:
+      - name: make_build
+        command: "make build"
 
   - name: unit_tests
     depends_on: [compile]
     jobs:
       - name: test_core
+        command: "./run_core"
       - name: test_network
+        command: "./run_net"
 
   - name: integration_tests
     depends_on: [compile]
     jobs:
       - name: test_end_to_end
+        command: "./run_e2e"
 
   - name: package
     depends_on: [unit_tests, integration_tests]
-    command: "make package"
+    jobs:
+      - name: make_package
+        command: "make package"
 ```
 
 * **Cycle Detection**: Condor validates the entire dependency graph before execution during parsing and `--dry-run`. Circular dependencies trigger an immediate configuration error.
@@ -162,68 +588,183 @@ stages:
 
 ---
 
-## 4. Hierarchical Defaults (defaults:)
+## 4. Defaults & Argument Inheritance (defaults: and append_args:)
 
-Condor eliminates boilerplate repetition across jobs by providing a hierarchical two-tier defaults system:
+Condor eliminates boilerplate repetition across jobs by providing a clean, 3-tier hierarchical defaults system:
 
-1. **Global `defaults:`**: Applied across every stage and job in the pipeline.
-2. **Stage `defaults:`**: Overrides or extends global defaults for all jobs within that specific stage.
-3. **Job-Level Settings**: Explicit job definitions take precedence over all inherited defaults.
+1. **Pipeline Global Defaults (`defaults.job`)**: Baseline `command`, `args`, `append_args`, `variables`, and `hooks` inherited across the entire pipeline.
+2. **Stage-Level Defaults (`stages[].defaults`)**: Scoped defaults for jobs within a specific stage. Different stages typically execute different commands (e.g. `make` for build, `./sim` for simulation, `gcov` for reporting) without duplicating `command:` across individual jobs.
+3. **Individual Job Configurations (`jobs[]`)**: Direct job-level options that override or append to inherited properties.
+
+```
++-------------------------------------------------------------+
+| TIER 1: Pipeline Global (defaults.job)                      |
+| command: "<global_command>"                                 |
+| args: "<global_args>"                                       |
+| append_args: <bool>                                         |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+| TIER 2: Stage Scoped (stages[].defaults)                    |
+| command: "<stage_command>"   (overrides Tier 1 command)     |
+| args: "<stage_args>"         (appends if Tier 2 append_args)|
+| append_args: <bool>                                         |
++------------------------------+------------------------------+
+                               |
+                               v
++-------------------------------------------------------------+
+| TIER 3: Individual Job (stages[].jobs[])                    |
+| command: "<job_command>"     (overrides Tier 2 command)     |
+| args: "<job_args>"           (appends if Tier 3 append_args)|
+| append_args: <bool>                                         |
++-------------------------------------------------------------+
+```
+
+### Argument Resolution & `append_args`
+
+By default (`append_args: false`), specifying `args:` at a more specific level completely **overrides** the arguments inherited from higher levels.
+
+When `append_args: true` is configured (either globally, per-stage, or per-job), arguments are **concatenated with a space**:
+- `final_args = "<inherited_args> <child_args>"`
+- A stage with `append_args: true` appends its `args` to `defaults.job.args`.
+- A job with `append_args: true` appends its `args` to the stage's resolved arguments.
+- Any child level can opt out of appending by specifying `append_args: false`.
+
+### Automatic Command Argument Appending
+
+Condor handles the injection of resolved arguments into the shell command automatically:
+1. **Explicit `${ARGS}` Placeholder**: If `command` explicitly contains `${ARGS}` (e.g., `"pytest ${ARGS} --report"`), Condor replaces `${ARGS}` in place.
+2. **Auto-Append**: If `command` does **not** contain `${ARGS}`, Condor automatically appends the resolved arguments to the end of the command:
+   ```text
+   "<command> <final_args>"
+   ```
+   Users do not need to add `${ARGS}` boilerplate to their command strings.
+
+### 3-Tier Hierarchy Example
 
 ```yaml
 defaults:
-  command: "pytest tests/ --test=${TEST_NAME} ${ARGS}"
-  variables:
-    ARGS: "-v"
-  hooks:
-    pre: "echo 'Starting ${CONDOR_JOB_NAME}'"
+  job:
+    command: "<base_runner>"
+    args: "--verbose --log-level=info"
+    append_args: true                # Global policy: append arguments down the hierarchy
+    hooks:
+      pre: "echo 'Starting job ${CONDOR_JOB_NAME}'"
 
 stages:
-  - name: test_suite
+  # Stage 1: Build stage using make
+  - name: build_stage
     defaults:
-      variables:
-        ARGS: "-v --tb=short"   # Overrides global ARGS for this stage
+      command: "make"                # Overrides global command for all jobs in this stage
+      args: "-j4"                    # Appends to global args -> "--verbose --log-level=info -j4"
+      append_args: true
     jobs:
-      - name: auth_tests
-      - name: api_tests
-      - name: heavy_tests
-        command: "pytest tests/heavy/ -v" # Overrides default command
+      - name: compile_core
+        args: "TARGET=core"          # Result: "make --verbose --log-level=info -j4 TARGET=core"
+      - name: compile_plugins
+        args: "TARGET=plugins"       # Result: "make --verbose --log-level=info -j4 TARGET=plugins"
+
+  # Stage 2: Simulation stage using a simulation binary
+  - name: sim_stage
+    depends_on: [build_stage]
+    defaults:
+      command: "./run_sim"           # Overrides command for simulation jobs
+      args: "--gui=off"              # Opts out of global args; replaces with stage args
+      append_args: false
+    jobs:
+      - name: sim_smoke
+        args: "--test=smoke"
+        append_args: true            # Appends to stage args -> "./run_sim --gui=off --test=smoke"
+      - name: sim_regression
+        args: "--test=regression --fast"
+        append_args: true            # Appends to stage args -> "./run_sim --gui=off --test=regression --fast"
+      - name: sim_custom
+        command: "./run_custom_sim"  # Overrides command directly
+        args: "--standalone"
+        append_args: false           # Replaces args completely -> "./run_custom_sim --standalone"
 ```
 
 ---
 
-## 5. Test Scaling & Parameter Sweeps
+## 5. Test Scaling, Multipliers & Matrix Sweeps (count, scalable, and matrix)
 
-Jobs support three distinct execution patterns:
+Condor provides domain-agnostic primitives for parallel scaling, parameter sweeps, and execution multipliers:
 
-### Single Command Shorthand
-For stages executing only a single task, specify `command:` directly on the stage:
+### Single Job Execution
+Each job in a stage explicitly declares its name and command (or inherits defaults):
 ```yaml
 stages:
   - name: build
-    command: "make build"
+    jobs:
+      - name: compile
+        command: "make build"
 ```
 
 ### Parallel Replication (count: N)
-Replicate a test across `N` parallel worker slots with automatic index assignment (`${INDEX}` from `1` to `N`):
+Replicate a test across `N` parallel worker slots with automatic index assignment (`${INDEX}` from `0` to `N - 1`):
 ```yaml
 jobs:
   - name: stress_test
-    count: 16                   # Dispatches 16 parallel jobs: stress_test_1 ... stress_test_16
+    count: 16                   # Dispatches 16 parallel jobs: stress_test_0 ... stress_test_15
 ```
 
-### Parameter Sweeps (seed and seeds)
-Assign specific random seeds or sweep multiple seeds:
+### Scalability Control (scalable: <bool>) & Count Multipliers
+In regression and CI/CD workflows, users often run quick smoke tests on pull requests (1x count) and soak tests on weekends (e.g., 5x or 10x count).
+
+Condor supports scaling counts dynamically via CLI flag `--count-multiplier <int>` or YAML setting `settings.count_multiplier`:
+* **`scalable: true` (default)**: The job count scales with the multiplier: `count = count * multiplier`.
+* **`scalable: false`**: The job count is **pinned**. The multiplier is ignored, and the job runs exactly `count` times.
+
 ```yaml
 jobs:
-  - name: fixed_seed_test
-    seed: 42                    # Injects ${SEED} = "42"
+  # Fuzz test: scales when passing e.g. --count-multiplier 5 (10 * 5 = 50 runs)
+  - name: fuzz_packet_parser
+    count: 10
+    scalable: true
 
-  - name: sweep_test
-    seeds: [100, 200, 300, 400] # Dispatches 4 jobs: sweep_test_seed_100 ... sweep_test_seed_400
+  # Fixed topology test: always runs exactly 3 instances, never multiplied
+  - name: three_node_consensus
+    count: 3
+    scalable: false
 ```
 
-@attention **Mutual Exclusivity**: `count` and `seed`/`seeds` cannot be combined on the same job definition.
+### Matrix Parameter Sweeps (matrix:)
+Sweep across arbitrary lists of variables using `matrix:`. Condor computes the **Cartesian product** across all dimensions and dispatches 1 job instance per combination:
+
+```yaml
+jobs:
+  # 1-Dimensional Sweep (e.g. reproducing specific targeted seeds)
+  - name: repro_failing_seeds
+    matrix:
+      SEED: [42, 1337, 2024]
+    command: "./sim --seed=${SEED}"
+
+  # Multi-Dimensional Sweep (cross-compilation matrix: 2 x 2 = 4 jobs)
+  - name: cross_compile
+    matrix:
+      ARCH: ["x86_64", "aarch64"]
+      OPT: ["O0", "O3"]
+    command: "gcc -${OPT} -march=${ARCH} -o bin/app_${ARCH}_${OPT} src/main.c"
+```
+
+Each matrix instance receives:
+* The matrix variable values injected into `job.variables` (accessible via `${VAR}` and environment variables).
+* `${INDEX}` representing the combination index (`0`, `1`, ...).
+* A self-describing, POSIX-safe job name (e.g., `cross_compile_ARCH_x86_64_OPT_O0`).
+* **Multiplier Immunity**: Discrete matrix combinations represent specific test targets and are **not** multiplied by `--count-multiplier`.
+
+### Combining matrix: and count:
+When both `matrix:` and `count: N` are specified on the same job, Condor replicates **each matrix combination** `N` times:
+
+```yaml
+jobs:
+  - name: benchmark
+    matrix:
+      BACKEND: ["vulkan", "opengl"]
+    count: 5                    # Runs 5 replicates of Vulkan and 5 replicates of OpenGL (10 total)
+    scalable: true              # If --count-multiplier 2 is passed, runs 10 of each (20 total)
+```
 
 ---
 
@@ -371,7 +912,7 @@ stages:
       - name: test_alu
         command: "./sim --test alu"          # Inherits NO job hooks!
 ```
-*Note*: For convenience, `stage_defaults: hooks: ...` is also accepted as a backwards-compatible alias. Any individual stage can override this default by specifying its own `hooks:` block.
+Any individual stage can override this default by specifying its own stage-level `hooks:` block.
 
 ---
 
@@ -428,7 +969,7 @@ stages:
 
 ### Job-Level Hooks & Defaults
 
-Job hooks wrap individual job execution inside `${CONDOR_JOB_DIR}`. They can be configured per individual job or inherited across an entire stage via `defaults.hooks`:
+Job hooks wrap individual job execution inside `${CONDOR_JOB_DIR}`. They can be configured per individual job or inherited across all jobs via `defaults.job.hooks`:
 
 ```yaml
 defaults:
@@ -625,8 +1166,6 @@ stages:
     jobs:
       - name: test_boot
 ```
-*(For backwards compatibility, `settings: default_backend: <name>` is also accepted).*
-
 #### 2. Command-Line Override (`-b / --backend`)
 You can override the pipeline backend globally at runtime without modifying the YAML file:
 
@@ -638,13 +1177,11 @@ condor -p pipeline.yaml -b slurm
 condor -p pipeline.yaml -b local
 ```
 
-Aliases accepted: `-b`, `--backend`, and `--backend-override`.
-
 #### Resolution Precedence
 When determining the execution backend for pipeline execution, Condor evaluates configuration in the following strict order of precedence:
 
 1. **CLI Flag**: `-b` / `--backend` / `--backend-override` (highest priority)
-2. **Settings Configuration**: `settings.backend:` (or `settings.default_backend:`)
+2. **Settings Configuration**: `settings.backend:`
 3. **Built-in System Fallback**: `local` (POSIX direct execution engine)
 
 ---

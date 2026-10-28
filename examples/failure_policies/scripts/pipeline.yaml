@@ -21,7 +21,9 @@ settings:
 
 stages:
   - name: setup
-    command: "bash ${CONDOR_PIPELINE_DIR}/success_job.sh"
+    jobs:
+      - name: setup_job
+        command: "bash ${CONDOR_PIPELINE_DIR}/success_job.sh"
 
   # Stage with allow_failure: true at stage level (jobs can fail without failing the stage)
   - name: experimental_features

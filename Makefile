@@ -120,6 +120,14 @@ download-deps vendor-deps: ## Fetch dependencies into third_party/ for offline d
 		echo "==> Fetching yaml-cpp (0.9.0) into third_party/yaml-cpp..."; \
 		git clone --depth 1 --branch yaml-cpp-0.9.0 https://github.com/jbeder/yaml-cpp.git third_party/yaml-cpp; \
 	fi
+	@if [ ! -d "third_party/nlohmann_json" ]; then \
+		echo "==> Fetching nlohmann_json (v3.11.3) into third_party/nlohmann_json..."; \
+		git clone --depth 1 --branch v3.11.3 https://github.com/nlohmann/json.git third_party/nlohmann_json; \
+	fi
+	@if [ ! -d "third_party/json-schema-validator" ]; then \
+		echo "==> Fetching json-schema-validator (2.4.1) into third_party/json-schema-validator..."; \
+		git clone --depth 1 https://github.com/pboettch/json-schema-validator.git third_party/json-schema-validator; \
+	fi
 	@echo "==> Dependencies successfully downloaded to third_party/"
 
 $(CONDOR_BIN):

@@ -28,12 +28,14 @@ stages:
 
   - name: test
     depends_on: [build]
-    defaults:
-      command: "bash ${CONDOR_PIPELINE_DIR}/test.sh"
     jobs:
       - name: unit_tests
+        command: "bash ${CONDOR_PIPELINE_DIR}/test.sh"
       - name: integration_tests
+        command: "bash ${CONDOR_PIPELINE_DIR}/test.sh"
 
   - name: package
     depends_on: [test]
-    command: "bash ${CONDOR_PIPELINE_DIR}/package.sh"
+    jobs:
+      - name: package_app
+        command: "bash ${CONDOR_PIPELINE_DIR}/package.sh"

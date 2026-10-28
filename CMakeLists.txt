@@ -56,6 +56,39 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 
+# --- nlohmann_json Dependency ---
+if(CONDOR_USE_LOCAL_DEPS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann_json/CMakeLists.txt")
+    message(STATUS "Condor: Using local third_party nlohmann_json")
+    set(FETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann_json")
+endif()
+
+set(JSON_BuildTests OFF CACHE BOOL "Disable nlohmann_json tests" FORCE)
+set(JSON_Install OFF CACHE BOOL "Disable nlohmann_json install" FORCE)
+
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3
+    GIT_SHALLOW    TRUE
+)
+
+# --- json-schema-validator Dependency ---
+if(CONDOR_USE_LOCAL_DEPS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/json-schema-validator/CMakeLists.txt")
+    message(STATUS "Condor: Using local third_party json-schema-validator")
+    set(FETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON_SCHEMA_VALIDATOR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/json-schema-validator")
+endif()
+
+set(JSON_VALIDATOR_BUILD_TESTS OFF CACHE BOOL "Disable validator tests" FORCE)
+set(JSON_VALIDATOR_BUILD_EXAMPLES OFF CACHE BOOL "Disable validator examples" FORCE)
+set(JSON_VALIDATOR_INSTALL OFF CACHE BOOL "Disable validator install" FORCE)
+
+FetchContent_Declare(
+    nlohmann_json_schema_validator
+    GIT_REPOSITORY https://github.com/pboettch/json-schema-validator.git
+    GIT_TAG        2.4.1
+    GIT_SHALLOW    TRUE
+)
+
 # Resolution: Check system first if custom flow, otherwise FetchContent
 find_package(yaml-cpp 0.9.0 QUIET)
 if(NOT yaml-cpp_FOUND)
@@ -67,6 +100,16 @@ if(NOT CLI11_FOUND)
     FetchContent_MakeAvailable(CLI11)
 endif()
 
+find_package(nlohmann_json 3.11 QUIET)
+if(NOT nlohmann_json_FOUND)
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
+find_package(nlohmann_json_schema_validator QUIET)
+if(NOT nlohmann_json_schema_validator_FOUND)
+    FetchContent_MakeAvailable(nlohmann_json_schema_validator)
+endif()
+
 # Core library source files
 set(CONDOR_LIB_SOURCES
     src/logging.cpp
@@ -74,6 +117,7 @@ set(CONDOR_LIB_SOURCES
     src/expression.cpp
     src/workspace.cpp
     src/parser.cpp
+    src/schema.cpp
     src/backend.cpp
     src/progress.cpp
     src/menu.cpp
@@ -88,6 +132,8 @@ target_include_directories(condor_core PUBLIC
 target_link_libraries(condor_core PUBLIC
     CLI11::CLI11
     yaml-cpp::yaml-cpp
+    nlohmann_json::nlohmann_json
+    nlohmann_json_schema_validator::validator
     pthread
 )
 
@@ -127,6 +173,11 @@ install(DIRECTORY examples/
 
 install(DIRECTORY res/backends/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/condor/backends
+    PATTERN ".*" EXCLUDE
+)
+
+install(DIRECTORY res/schema/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/condor/schema
     PATTERN ".*" EXCLUDE
 )
 

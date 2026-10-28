@@ -70,6 +70,7 @@ int main(int argc, char** argv) {
     bool dry_run{false};
     bool no_interactive{false};
     bool verbose_logging{false};
+    size_t count_multiplier{0};
 
     // CLI Options per specification
     app.add_option("pipeline_file,--pipeline-config", pipeline_config_path, "Path to pipeline YAML configuration")
@@ -77,6 +78,8 @@ int main(int argc, char** argv) {
 
     app.add_option("--stage", stage_name, "Run only the specified stage (must match ^[a-zA-Z0-9_-]+$)");
     app.add_option("--max-parallel-jobs", max_parallel_jobs, "Maximum concurrent local jobs (default: hardware concurrency)");
+    app.add_option("--count-multiplier", count_multiplier, "Multiplier for scalable job counts (default: 1)")
+       ->check(CLI::PositiveNumber);
     app.add_option("--base-output-dir", base_output_dir, "Base folder for timestamped runs (default: ./condor_runs)");
     app.add_option("--run-dir", run_dir, "Run inside explicit fixed directory instead of generating timestamped directory");
     app.add_option("-b,--backend,--backend-override", backend_override, "Execution backend for pipeline (default: local or configured in YAML)");
@@ -139,7 +142,7 @@ int main(int argc, char** argv) {
 
     PipelineConfig config;
     try {
-        config = YamlParser::parse_file(pipeline_config_path);
+        config = YamlParser::parse_file(pipeline_config_path, count_multiplier);
     } catch (const ConfigurationError& e) {
         std::cerr << e.what() << std::endl;
         return 1;

@@ -21,18 +21,26 @@ settings:
 
 stages:
   - name: build
-    command: "bash ${CONDOR_PIPELINE_DIR}/build.sh"
+    jobs:
+      - name: compile
+        command: "bash ${CONDOR_PIPELINE_DIR}/build.sh"
 
   - name: quick_check
     depends_on: [build]
     enabled_if: "${fast_mode} == '1'"
-    command: "bash ${CONDOR_PIPELINE_DIR}/smoke_check.sh"
+    jobs:
+      - name: smoke_check
+        command: "bash ${CONDOR_PIPELINE_DIR}/smoke_check.sh"
 
   - name: heavy_coverage
     depends_on: [build]
     enabled_if: "${coverage} == '1'"
-    command: "bash ${CONDOR_PIPELINE_DIR}/coverage_check.sh"
+    jobs:
+      - name: coverage_check
+        command: "bash ${CONDOR_PIPELINE_DIR}/coverage_check.sh"
 
   - name: report
     depends_on: [quick_check, heavy_coverage]
-    command: "bash ${CONDOR_PIPELINE_DIR}/report.sh"
+    jobs:
+      - name: generate_report
+        command: "bash ${CONDOR_PIPELINE_DIR}/report.sh"

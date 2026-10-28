@@ -202,6 +202,7 @@ OPTIONS:
 ## Example Pipeline
 
 ```yaml
+# yaml-language-server: $schema=res/schema/condor-pipeline-schema.json
 name: build_and_test
 
 variables:
@@ -213,6 +214,14 @@ settings:
   base_output_dir: "./condor_runs"
   on_failure_action: "abort"
   path_style: "relative"  # "absolute" (default) or "relative" (portable relative paths inside runs)
+  backend: "local"        # "local", "slurm", "lsf", "sge", "pbs", "spark"
+
+defaults:
+  command: "pytest tests/ --test=${TEST_NAME}"
+  hooks:
+    pre: "echo '[PRE] Preparing test workspace'"
+    post: "rm -f *.tmp"
+    always: true
 
 stages:
   - name: build
@@ -225,12 +234,19 @@ stages:
     jobs:
       - name: smoke_test
         command: "./app --smoke"
+      - name: parallel_stress
+        count: 4          # Replicates into 4 parallel jobs (_0, _1, _2, _3)
+        command: "./app --stress --worker=${INDEX}"
 
   - name: coverage_report
     depends_on: [test]
     enabled_if: "${coverage} == '1'"
-    command: "gcov app"
+    jobs:
+      - name: run_coverage
+        command: "gcov app"
 ```
+
+For the complete reference of all YAML configuration options, see the [Pipeline YAML Specification](file:///home/eze/projects/github/condor/docs/user/pipeline-spec.md).
 
 ---
 
@@ -263,11 +279,11 @@ The table below summarizes the minimal set of examples covering 100% of Condor's
 
 | Example | Directory | Key Configurations Covered |
 | :--- | :--- | :--- |
-| **Simple** | [`examples/simple/`](file:///home/eze/projects/github/condor/examples/simple/) | Linear DAG (`build -> test -> package`), stage single-command shorthand vs explicit `jobs:`, global & stage variables, status interval. |
+| **Simple** | [`examples/simple/`](file:///home/eze/projects/github/condor/examples/simple/) | Linear DAG (`build -> test -> package`), stage-level dependencies, global variables, status interval. |
 | **Conditional DAG** | [`examples/conditional/`](file:///home/eze/projects/github/condor/examples/conditional/) | Diamond/branching DAG, stage & job-level `enabled_if` conditionals (`==`, `!=`, comparisons), skipped stage dependency satisfaction. |
-| **Matrix & Includes** | [`examples/matrix_and_includes/`](file:///home/eze/projects/github/condor/examples/matrix_and_includes/) | `path_style: relative`, global `defaults:`, stage-level `defaults:` merging, test replication (`count: 4`), multi-seed sweeps (`seeds: [...]`), modular test suite `include: "test_suite.yaml"`. |
+| **Matrix & Includes** | [`examples/matrix_and_includes/`](file:///home/eze/projects/github/condor/examples/matrix_and_includes/) | `path_style: relative`, global `defaults:`, test replication (`count: 4`), multi-seed sweeps (`seeds: [...]`), modular test suite `include: "test_suite.yaml"`. |
 | **Failure Policies** | [`examples/failure_policies/`](file:///home/eze/projects/github/condor/examples/failure_policies/) | `on_failure_action: continue`, `exit_zero_on_failure: true`, `allow_failure: true` on stages & jobs, lifecycle hooks with `always: true`, `output_mode: failures`. |
-| **Custom Backends** | [`examples/custom_backends/`](file:///home/eze/projects/github/condor/examples/custom_backends/) | Custom template backends (`type: template` e.g. Slurm/SGE simulation), `{script}`, `{grid_id}`, `{job_id}`, stage-level backend, job-level backend overrides, job-level `depends_on: ["prepare/0002"]`. |
+| **Custom Backends** | [`examples/custom_backends/`](file:///home/eze/projects/github/condor/examples/custom_backends/) | Custom template backends (`type: template` e.g. Slurm/SGE simulation), `{script}`, `{grid_id}`, `{job_id}`, cross-stage job-level `depends_on: ["prepare/0002"]`. |
 | **Verilator EDA** | [`examples/verilator/`](file:///home/eze/projects/github/condor/examples/verilator/) | Real-world hardware verification pipeline, SystemVerilog RTL, cycle-accurate C++ testbench, 10 test suites, conditional coverage (`verilator_coverage`), unified report generation. |
 
 ### Running the Examples:

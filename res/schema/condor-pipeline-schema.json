@@ -1,0 +1,286 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/zkalves/condor/main/res/schema/condor-pipeline-schema.json",
+  "title": "Condor Pipeline Configuration Schema",
+  "description": "JSON Schema specification for Condor C++20 pipeline YAML files",
+  "type": "object",
+  "required": ["stages"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Pipeline project name"
+    },
+    "include": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ],
+      "description": "Root-level YAML configuration file(s) to include"
+    },
+    "variables": {
+      "type": "object",
+      "description": "Global application-independent variables",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      }
+    },
+    "settings": {
+      "type": "object",
+      "description": "Runtime execution options and settings",
+      "properties": {
+        "max_parallel_jobs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum concurrent job execution slots (0 = automatic)"
+        },
+        "base_output_dir": {
+          "type": "string",
+          "description": "Directory where run outputs are stored"
+        },
+        "run_dir": {
+          "type": "string",
+          "description": "Explicit output directory override"
+        },
+        "on_failure_action": {
+          "type": "string",
+          "enum": ["abort", "continue", "stage_barrier"],
+          "description": "Pipeline failure policy"
+        },
+        "exit_zero_on_failure": {
+          "type": "boolean",
+          "description": "Exit with code 0 even if jobs failed"
+        },
+        "status_interval_sec": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Interval in seconds between periodic status summaries"
+        },
+        "backend": {
+          "type": "string",
+          "description": "Execution backend identifier"
+        },
+        "output_mode": {
+          "type": "string",
+          "enum": ["all", "failures", "summary"],
+          "description": "Terminal output verbosity mode"
+        },
+        "path_style": {
+          "type": "string",
+          "enum": ["absolute", "relative"],
+          "description": "Path export style for environment variables"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Dry run execution without spawning jobs"
+        },
+        "no_interactive": {
+          "type": "boolean",
+          "description": "Disable interactive terminal features"
+        },
+        "verbose_logging": {
+          "type": "boolean",
+          "description": "Enable verbose logging"
+        },
+        "count_multiplier": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Global multiplier for scalable job counts"
+        }
+      },
+      "additionalProperties": false
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Default configuration inherited by stages and jobs",
+      "properties": {
+        "command": { "type": "string" },
+        "args": { "type": "string" },
+        "append_args": { "type": "boolean" },
+        "scalable": { "type": "boolean" },
+        "hooks": { "$ref": "#/definitions/HookConfig" },
+        "variables": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "stage": {
+          "type": "object",
+          "properties": {
+            "hooks": { "$ref": "#/definitions/HookConfig" }
+          },
+          "additionalProperties": false
+        },
+        "job": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "string" },
+            "args": { "type": "string" },
+            "append_args": { "type": "boolean" },
+            "scalable": { "type": "boolean" },
+            "hooks": { "$ref": "#/definitions/HookConfig" },
+            "variables": {
+              "type": "object",
+              "additionalProperties": { "type": ["string", "number", "boolean"] }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "backends": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "enum": ["local", "template"] },
+          "description": { "type": "string" },
+          "submit_command": { "type": "string" },
+          "poll_command": { "type": "string" },
+          "cancel_command": { "type": "string" },
+          "job_id_regex": { "type": "string" },
+          "success_pattern": { "type": "string" },
+          "failure_pattern": { "type": "string" },
+          "running_pattern": { "type": "string" },
+          "empty_poll_means_done": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "hooks": {
+      "$ref": "#/definitions/HookConfig"
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/StageConfig" }
+    }
+  },
+  "definitions": {
+    "HookConfig": {
+      "type": "object",
+      "properties": {
+        "pre": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "post": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "always": { "type": "boolean" },
+        "allow_failure": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "StageConfig": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "POSIX-safe identifier for stage name"
+        },
+        "enabled_if": { "type": "string" },
+        "allow_failure": { "type": "boolean" },
+        "depends_on": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "hooks": { "$ref": "#/definitions/HookConfig" },
+        "include": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "defaults": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "string" },
+            "args": { "type": "string" },
+            "append_args": { "type": "boolean" },
+            "scalable": { "type": "boolean" },
+            "hooks": { "$ref": "#/definitions/HookConfig" },
+            "variables": {
+              "type": "object",
+              "additionalProperties": { "type": ["string", "number", "boolean"] }
+            },
+            "job": {
+              "type": "object",
+              "properties": {
+                "command": { "type": "string" },
+                "args": { "type": "string" },
+                "append_args": { "type": "boolean" },
+                "scalable": { "type": "boolean" },
+                "hooks": { "$ref": "#/definitions/HookConfig" },
+                "variables": {
+                  "type": "object",
+                  "additionalProperties": { "type": ["string", "number", "boolean"] }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "jobs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/JobConfig" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "JobConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "command": { "type": "string" },
+        "args": { "type": "string" },
+        "append_args": { "type": "boolean" },
+        "scalable": {
+          "type": "boolean",
+          "description": "If false, job count is pinned and unaffected by count multipliers"
+        },
+        "enabled_if": { "type": "string" },
+        "allow_failure": { "type": "boolean" },
+        "depends_on": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "hooks": { "$ref": "#/definitions/HookConfig" },
+        "variables": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "count": { "type": "integer", "minimum": 1 },
+        "matrix": {
+          "type": "object",
+          "description": "Matrix parameter sweep mapping variable names to lists of values",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": ["string", "number", "boolean"] },
+            "minItems": 1
+          }
+        },
+        "include": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ],
+          "description": "External YAML file(s) containing job definitions to merge"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

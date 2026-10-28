@@ -84,6 +84,8 @@ struct HookConfig {
 struct JobDefaults {
     std::string command;                                     ///< Default command line to execute if unspecified in job.
     std::string args;                                        ///< Default extra arguments appended to command.
+    std::optional<bool> append_args;                         ///< If true, append args to parent defaults rather than overriding.
+    std::optional<bool> scalable;                            ///< If false, job count is pinned and unaffected by count multipliers.
     HookConfig hooks;                                        ///< Default lifecycle hooks.
     std::unordered_map<std::string, std::string> variables;  ///< Default variables scoped to this hierarchy level.
 };
@@ -110,9 +112,10 @@ struct JobConfig {
     std::vector<std::string> depends_on;                    ///< List of prerequisite job IDs or stage names.
     HookConfig hooks;                                       ///< Job-level lifecycle hooks.
     std::unordered_map<std::string, std::string> variables; ///< Job-level scoped variables.
-    std::optional<int> count;                               ///< Multi-instance count for matrix test generation.
-    std::optional<int> seed;                                ///< Explicit pseudo-random seed assigned to this job instance.
-    std::vector<int> seeds;                                 ///< Explicit seed list for seed parameter sweeps.
+    std::optional<bool> append_args;                        ///< If true, append args to inherited defaults rather than overriding.
+    std::optional<int> count;                               ///< Multi-instance count for replicated test execution.
+    bool scalable{true};                                    ///< If false, job count is pinned and unaffected by CLI count multiplier.
+    std::unordered_map<std::string, std::vector<std::string>> matrix; ///< Matrix parameter sweep variables.
 };
 
 /**
@@ -127,7 +130,7 @@ struct StageConfig {
     HookConfig hooks;                     ///< Stage-level lifecycle hooks.
     std::vector<JobConfig> jobs;          ///< List of jobs configured directly inside this stage.
     std::vector<std::string> includes;    ///< Nested YAML test suite files included into this stage.
-    JobDefaults defaults;                 ///< Stage-level defaults overriding global pipeline defaults.
+    JobDefaults defaults;                 ///< Stage-scoped defaults for jobs in this stage.
 };
 
 /**
@@ -150,6 +153,7 @@ struct PipelineSettings {
     PathStyle path_style{PathStyle::ABSOLUTE};            ///< Path format for environment exports: absolute or relative.
     std::string stage_filter;                             ///< Run only the specified stage if passed via --stage.
     std::string backend_override;                         ///< Force all jobs to use this backend if specified via --backend-override.
+    size_t count_multiplier{1};                           ///< Multiplier for scalable job counts (default: 1).
 };
 
 /**

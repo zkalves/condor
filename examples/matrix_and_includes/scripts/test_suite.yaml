@@ -14,8 +14,11 @@ defaults:
 
 jobs:
   - name: boundary_test
-    seed: 999
+    variables:
+      SEED: "999"
   - name: fuzz_sweep
-    seeds: [101, 202, 303, 404]
+    matrix:
+      SEED: [101, 202, 303, 404]
   - name: memory_leak_check
-    seed: 1234
+    variables:
+      SEED: "1234"

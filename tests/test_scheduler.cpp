@@ -196,11 +196,12 @@ name: test_stage_defaults_pipeline
 settings:
   max_parallel_jobs: 1
   on_failure_action: abort
-stage_defaults:
-  hooks:
-    pre: "echo 'default_stage_pre' > stage_marker.txt"
-    post: "echo 'default_stage_post' >> stage_marker.txt"
-    always: true
+defaults:
+  stage:
+    hooks:
+      pre: "echo 'default_stage_pre' > stage_marker.txt"
+      post: "echo 'default_stage_post' >> stage_marker.txt"
+      always: true
 stages:
   - name: stage_alpha
     jobs:

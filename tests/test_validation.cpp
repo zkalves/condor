@@ -90,60 +90,49 @@ stages:
     ASSERT_THROWS(YamlParser::parse_string(unknown_dep_yaml), ConfigurationError);
 }
 
-TEST_CASE(seed_and_count_mutual_exclusion) {
-    // 1. count + seed
-    std::string yaml_count_seed = R"(
-stages:
-  - name: sim
-    jobs:
-      - name: fuzz
-        command: "run --test=fuzz"
-        count: 5
-        seed: 42
-)";
-    ASSERT_THROWS(YamlParser::parse_string(yaml_count_seed), ConfigurationError);
-
-    // 2. count + seeds
-    std::string yaml_count_seeds = R"(
-stages:
-  - name: sim
-    jobs:
-      - name: fuzz
-        command: "run --test=fuzz"
-        count: 5
-        seeds: [42, 1337]
-)";
-    ASSERT_THROWS(YamlParser::parse_string(yaml_count_seeds), ConfigurationError);
-
-    // 3. seed + seeds
-    std::string yaml_seed_seeds = R"(
+TEST_CASE(seed_and_seeds_rejection) {
+    // 1. job with 'seed'
+    std::string yaml_seed = R"(
 stages:
   - name: sim
     jobs:
       - name: fuzz
         command: "run --test=fuzz"
         seed: 42
+)";
+    ASSERT_THROWS(YamlParser::parse_string(yaml_seed), ConfigurationError);
+
+    // 2. job with 'seeds'
+    std::string yaml_seeds = R"(
+stages:
+  - name: sim
+    jobs:
+      - name: fuzz
+        command: "run --test=fuzz"
         seeds: [42, 1337]
 )";
-    ASSERT_THROWS(YamlParser::parse_string(yaml_seed_seeds), ConfigurationError);
+    ASSERT_THROWS(YamlParser::parse_string(yaml_seeds), ConfigurationError);
 }
 
-TEST_CASE(seed_expansion_and_defaults) {
+TEST_CASE(matrix_expansion_and_defaults) {
     std::string yaml = R"(
+defaults:
+  job:
+    command: "sim --test=${TEST_NAME} --seed=${SEED}"
 stages:
   - name: sim
-    defaults:
-      command: "sim --test=${TEST_NAME} --seed=${SEED}"
     jobs:
       - name: arithmetic
-        seed: 100
+        variables:
+          SEED: "100"
       - name: fuzz
-        seeds: [42, 1337]
+        matrix:
+          SEED: [42, 1337]
 )";
     auto config = YamlParser::parse_string(yaml);
     ASSERT_TRUE(config.stages.size() == 1);
     const auto& stage = config.stages[0];
-    // arithmetic (1 job) + fuzz (2 seeds) = 3 jobs
+    // arithmetic (1 job) + fuzz (2 matrix items) = 3 jobs
     ASSERT_TRUE(stage.jobs.size() == 3);
 
     // Job 0: arithmetic
@@ -152,23 +141,78 @@ stages:
     ASSERT_TRUE(stage.jobs[0].variables.at("TEST_NAME") == "arithmetic");
     ASSERT_TRUE(stage.jobs[0].variables.at("SEED") == "100");
 
-    // Job 1: fuzz_seed_42
-    ASSERT_TRUE(stage.jobs[1].name == "fuzz_seed_42");
+    // Job 1: fuzz_SEED_42
+    ASSERT_TRUE(stage.jobs[1].name == "fuzz_SEED_42");
     ASSERT_TRUE(stage.jobs[1].variables.at("TEST_NAME") == "fuzz");
     ASSERT_TRUE(stage.jobs[1].variables.at("SEED") == "42");
 
-    // Job 2: fuzz_seed_1337
-    ASSERT_TRUE(stage.jobs[2].name == "fuzz_seed_1337");
+    // Job 2: fuzz_SEED_1337
+    ASSERT_TRUE(stage.jobs[2].name == "fuzz_SEED_1337");
     ASSERT_TRUE(stage.jobs[2].variables.at("TEST_NAME") == "fuzz");
     ASSERT_TRUE(stage.jobs[2].variables.at("SEED") == "1337");
 }
 
-TEST_CASE(count_expansion) {
+TEST_CASE(matrix_multidimensional_cartesian_product) {
     std::string yaml = R"(
 stages:
+  - name: build
+    jobs:
+      - name: compile
+        command: "build -arch=${ARCH} -opt=${OPT}"
+        matrix:
+          ARCH: ["x86", "arm"]
+          OPT: ["O0", "O2"]
+)";
+    auto config = YamlParser::parse_string(yaml);
+    ASSERT_TRUE(config.stages[0].jobs.size() == 4);
+    const auto& jobs = config.stages[0].jobs;
+    ASSERT_TRUE(jobs[0].variables.at("ARCH") == "x86" && jobs[0].variables.at("OPT") == "O0");
+    ASSERT_TRUE(jobs[1].variables.at("ARCH") == "x86" && jobs[1].variables.at("OPT") == "O2");
+    ASSERT_TRUE(jobs[2].variables.at("ARCH") == "arm" && jobs[2].variables.at("OPT") == "O0");
+    ASSERT_TRUE(jobs[3].variables.at("ARCH") == "arm" && jobs[3].variables.at("OPT") == "O2");
+}
+
+TEST_CASE(count_multiplier_and_scalable_flag) {
+    std::string yaml = R"(
+settings:
+  count_multiplier: 3
+stages:
+  - name: test_stage
+    jobs:
+      - name: fuzz_scalable
+        count: 2
+        scalable: true
+      - name: fixed_repro
+        count: 2
+        scalable: false
+      - name: matrix_fixed
+        matrix:
+          SEED: [42, 1337]
+)";
+    auto config = YamlParser::parse_string(yaml);
+    const auto& jobs = config.stages[0].jobs;
+    // fuzz_scalable: 2 * 3 = 6 jobs
+    // fixed_repro: exactly 2 jobs (scalable: false)
+    // matrix_fixed: exactly 2 jobs (no count specified)
+    // Total: 6 + 2 + 2 = 10 jobs
+    ASSERT_TRUE(jobs.size() == 10);
+
+    // Verify CLI multiplier override
+    auto config_override = YamlParser::parse_string(yaml, ".", 5);
+    // fuzz_scalable: 2 * 5 = 10 jobs
+    // fixed_repro: exactly 2 jobs (scalable: false)
+    // matrix_fixed: exactly 2 jobs
+    // Total: 10 + 2 + 2 = 14 jobs
+    ASSERT_TRUE(config_override.stages[0].jobs.size() == 14);
+}
+
+TEST_CASE(count_expansion) {
+    std::string yaml = R"(
+defaults:
+  job:
+    command: "sim --test=${TEST_NAME} --seed=${SEED}"
+stages:
   - name: sim
-    defaults:
-      command: "sim --test=${TEST_NAME} --seed=${SEED}"
     jobs:
       - name: stress
         count: 3
@@ -293,7 +337,21 @@ stages:
     ASSERT_TRUE(config_settings.settings.backend == "lsf");
     ASSERT_TRUE(config_settings.settings.default_backend == "lsf");
 
-    // 2. Valid: settings: default_backend: slurm
+    // 2. Valid: settings: backend: slurm
+    std::string yaml_slurm_settings = R"(
+name: test_slurm_backend_settings
+settings:
+  backend: slurm
+stages:
+  - name: test_stage
+    jobs:
+      - name: job_3
+        command: "echo 3"
+)";
+    auto config_def = YamlParser::parse_string(yaml_slurm_settings);
+    ASSERT_TRUE(config_def.settings.backend == "slurm");
+
+    // 3. Error: alias default_backend is rejected
     std::string yaml_default_settings = R"(
 name: test_default_backend_settings
 settings:
@@ -304,9 +362,7 @@ stages:
       - name: job_3
         command: "echo 3"
 )";
-    auto config_def = YamlParser::parse_string(yaml_default_settings);
-    ASSERT_TRUE(config_def.settings.backend == "slurm");
-    ASSERT_TRUE(config_def.settings.default_backend == "slurm");
+    ASSERT_THROWS(YamlParser::parse_string(yaml_default_settings), ConfigurationError);
 
     // 3. Error: top-level backend: slurm is rejected
     std::string yaml_top = R"(
@@ -381,4 +437,294 @@ stages:
         caught_defaults = true;
     }
     ASSERT_TRUE(caught_defaults);
+}
+
+TEST_CASE(schema_validation_unknown_property) {
+    std::string yaml_unknown_prop = R"(
+name: test_unknown
+unknown_top_level_key: 123
+stages:
+  - name: test_stage
+    jobs:
+      - name: test_job
+        command: "echo test"
+)";
+    bool caught = false;
+    try {
+        YamlParser::parse_string(yaml_unknown_prop);
+    } catch (const ConfigurationError& e) {
+        caught = true;
+        std::string msg = e.what();
+        ASSERT_TRUE(msg.find("Schema validation failed") != std::string::npos);
+    }
+    ASSERT_TRUE(caught);
+}
+
+TEST_CASE(schema_validation_type_mismatch) {
+    std::string yaml_bad_type = R"(
+name: test_type
+settings:
+  max_parallel_jobs: "invalid_string_slot"
+stages:
+  - name: test_stage
+    jobs:
+      - name: test_job
+        command: "echo test"
+)";
+    bool caught = false;
+    try {
+        YamlParser::parse_string(yaml_bad_type);
+    } catch (const ConfigurationError& e) {
+        caught = true;
+        std::string msg = e.what();
+        ASSERT_TRUE(msg.find("Schema validation failed") != std::string::npos);
+    }
+    ASSERT_TRUE(caught);
+}
+
+TEST_CASE(schema_validation_invalid_enum) {
+    std::string yaml_bad_enum = R"(
+name: test_enum
+settings:
+  on_failure_action: "unsupported_action"
+stages:
+  - name: test_stage
+    jobs:
+      - name: test_job
+        command: "echo test"
+)";
+    bool caught = false;
+    try {
+        YamlParser::parse_string(yaml_bad_enum);
+    } catch (const ConfigurationError& e) {
+        caught = true;
+        std::string msg = e.what();
+        ASSERT_TRUE(msg.find("Schema validation failed") != std::string::npos);
+    }
+    ASSERT_TRUE(caught);
+}
+
+TEST_CASE(schema_validation_missing_required_stages) {
+    std::string yaml_missing_stages = R"(
+name: test_no_stages
+settings:
+  max_parallel_jobs: 2
+)";
+    bool caught = false;
+    try {
+        YamlParser::parse_string(yaml_missing_stages);
+    } catch (const ConfigurationError& e) {
+        caught = true;
+        std::string msg = e.what();
+        ASSERT_TRUE(msg.find("Schema validation failed") != std::string::npos);
+    }
+    ASSERT_TRUE(caught);
+}
+
+TEST_CASE(schema_validation_invalid_job_field) {
+    std::string yaml_bad_job_field = R"(
+name: test_bad_job
+stages:
+  - name: test_stage
+    jobs:
+      - name: test_job
+        command: "echo 1"
+        disallowed_custom_field: true
+)";
+    bool caught = false;
+    try {
+        YamlParser::parse_string(yaml_bad_job_field);
+    } catch (const ConfigurationError& e) {
+        caught = true;
+        std::string msg = e.what();
+        ASSERT_TRUE(msg.find("Schema validation failed") != std::string::npos);
+    }
+    ASSERT_TRUE(caught);
+}
+
+TEST_CASE(schema_validation_dual_format_options) {
+    // Valid dual-format usage: single arguments and sequences for depends_on, hooks, include
+    std::string yaml_dual_formats = R"(
+name: dual_format_pipeline
+hooks:
+  pre: ["echo hook 1", "echo hook 2"]
+  post: "echo hook done"
+stages:
+  - name: stage_single_dep
+    jobs:
+      - name: job_1
+        command: "echo 1"
+  - name: stage_seq_dep
+    depends_on: ["stage_single_dep"]
+    hooks:
+      pre: "echo pre"
+      post:
+        - "echo post 1"
+        - "echo post 2"
+    jobs:
+      - name: job_single_dep
+        command: "echo test"
+        depends_on: "0001"
+      - name: job_seq_deps
+        command: "echo tests"
+        depends_on:
+          - "0001"
+)";
+    auto config = YamlParser::parse_string(yaml_dual_formats);
+    ASSERT_TRUE(config.stages.size() == 2);
+    ASSERT_TRUE(config.stages[1].depends_on.size() == 1);
+    ASSERT_TRUE(config.stages[1].depends_on[0] == "stage_single_dep");
+    ASSERT_TRUE(config.hooks.pre_commands.size() == 2);
+    ASSERT_TRUE(config.stages[1].hooks.post_commands.size() == 2);
+}
+
+TEST_CASE(schema_validation_scalar_only_rejection) {
+    // Supplying a sequence/list to scalar-only properties like command must fail schema validation
+    std::string yaml_bad_scalar = R"(
+name: test_scalar_rejection
+stages:
+  - name: stage1
+    jobs:
+      - name: job1
+        command: ["echo", "not", "allowed", "as", "list"]
+)";
+    bool caught = false;
+    try {
+        YamlParser::parse_string(yaml_bad_scalar);
+    } catch (const ConfigurationError& e) {
+        caught = true;
+        std::string msg = e.what();
+        ASSERT_TRUE(msg.find("Schema validation failed") != std::string::npos);
+    }
+    ASSERT_TRUE(caught);
+}
+
+TEST_CASE(schema_validation_stage_command_rejected) {
+    // Stage must not declare command directly; commands belong to jobs
+    std::string yaml_stage_cmd = R"(
+name: test_stage_cmd
+stages:
+  - name: build
+    command: "make build"
+)";
+    bool caught = false;
+    try {
+        YamlParser::parse_string(yaml_stage_cmd);
+    } catch (const ConfigurationError& e) {
+        caught = true;
+        std::string msg = e.what();
+        ASSERT_TRUE(msg.find("Schema validation failed") != std::string::npos);
+    }
+    ASSERT_TRUE(caught);
+}
+
+TEST_CASE(stage_defaults_and_job_command_args_inheritance) {
+    std::string yaml_stage_defaults = R"(
+name: test_stage_defs
+stages:
+  - name: test_stage
+    defaults:
+      command: "python run.py"
+      args: "--quick"
+    jobs:
+      - name: j1
+      - name: j2
+        command: "python custom.py"
+        args: "--detailed"
+)";
+    PipelineConfig cfg = YamlParser::parse_string(yaml_stage_defaults);
+    ASSERT_TRUE(cfg.stages.size() == 1UL);
+    ASSERT_TRUE(cfg.stages[0].jobs.size() == 2UL);
+
+    const auto& j1 = cfg.stages[0].jobs[0];
+    ASSERT_TRUE(j1.name == "j1");
+    ASSERT_TRUE(j1.command == "python run.py --quick");
+    ASSERT_TRUE(j1.variables.find("ARGS") != j1.variables.end());
+    ASSERT_TRUE(j1.variables.at("ARGS") == "--quick");
+
+    const auto& j2 = cfg.stages[0].jobs[1];
+    ASSERT_TRUE(j2.name == "j2");
+    ASSERT_TRUE(j2.command == "python custom.py --detailed");
+    ASSERT_TRUE(j2.variables.find("ARGS") != j2.variables.end());
+    ASSERT_TRUE(j2.variables.at("ARGS") == "--detailed");
+}
+
+TEST_CASE(append_args_three_tier_resolution) {
+    std::string yaml_tiers = R"(
+name: test_append_tiers
+defaults:
+  job:
+    command: "runner"
+    args: "--global"
+    append_args: true
+stages:
+  - name: build
+    defaults:
+      command: "make"
+      args: "-j4"
+      append_args: true
+    jobs:
+      - name: compile
+        args: "TARGET=all"
+  - name: sim
+    defaults:
+      command: "./sim"
+      args: "--fast"
+      append_args: false
+    jobs:
+      - name: t1
+        args: "--seed 100"
+        append_args: true
+      - name: t2
+        args: "--seed 200"
+        append_args: false
+)";
+    PipelineConfig cfg = YamlParser::parse_string(yaml_tiers);
+    ASSERT_TRUE(cfg.stages.size() == 2UL);
+
+    // Stage 1 (build):
+    // Stage defaults: command="make", args="--global -j4" (appends because append_args: true)
+    // Job compile: args="TARGET=all", append_args inherited (true) -> final_args="--global -j4 TARGET=all"
+    const auto& j_compile = cfg.stages[0].jobs[0];
+    ASSERT_TRUE(j_compile.command == "make --global -j4 TARGET=all");
+    ASSERT_TRUE(j_compile.variables.at("ARGS") == "--global -j4 TARGET=all");
+
+    // Stage 2 (sim):
+    // Stage defaults: command="./sim", args="--fast" (overrides global because append_args: false)
+    // Job t1: args="--seed 100", append_args: true -> final_args="--fast --seed 100"
+    const auto& j_t1 = cfg.stages[1].jobs[0];
+    ASSERT_TRUE(j_t1.command == "./sim --fast --seed 100");
+    ASSERT_TRUE(j_t1.variables.at("ARGS") == "--fast --seed 100");
+
+    // Job t2: args="--seed 200", append_args: false -> final_args="--seed 200" (overrides stage args)
+    const auto& j_t2 = cfg.stages[1].jobs[1];
+    ASSERT_TRUE(j_t2.command == "./sim --seed 200");
+    ASSERT_TRUE(j_t2.variables.at("ARGS") == "--seed 200");
+}
+
+TEST_CASE(args_auto_append_vs_explicit_interpolation) {
+    std::string yaml_args = R"(
+name: test_auto_append
+stages:
+  - name: s1
+    jobs:
+      - name: explicit_args
+        command: "exec_tool ${ARGS} --after"
+        args: "--before"
+      - name: auto_append_args
+        command: "exec_tool"
+        args: "--flag 1"
+)";
+    PipelineConfig cfg = YamlParser::parse_string(yaml_args);
+    ASSERT_TRUE(cfg.stages[0].jobs.size() == 2UL);
+
+    const auto& j_exp = cfg.stages[0].jobs[0];
+    // Contains ${ARGS}, so not auto-appended
+    ASSERT_TRUE(j_exp.command == "exec_tool ${ARGS} --after");
+    ASSERT_TRUE(j_exp.variables.at("ARGS") == "--before");
+
+    const auto& j_auto = cfg.stages[0].jobs[1];
+    // Does not contain ${ARGS}, so auto-appended
+    ASSERT_TRUE(j_auto.command == "exec_tool --flag 1");
+    ASSERT_TRUE(j_auto.variables.at("ARGS") == "--flag 1");
 }

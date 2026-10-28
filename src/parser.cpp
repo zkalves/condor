@@ -20,6 +20,7 @@
 #include "condor/parser.hpp"
 #include "condor/backend.hpp"
 #include "condor/logging.hpp"
+#include "condor/schema.hpp"
 #include <yaml-cpp/yaml.h>
 #include <fstream>
 #include <sstream>
@@ -112,6 +113,8 @@ static JobDefaults parse_defaults_node(const YAML::Node& node) {
     }
     if (node["command"]) defs.command = node["command"].as<std::string>();
     if (node["args"])    defs.args    = node["args"].as<std::string>();
+    if (node["append_args"]) defs.append_args = node["append_args"].as<bool>();
+    if (node["scalable"]) defs.scalable = node["scalable"].as<bool>();
     if (node["hooks"] && node["hooks"].IsMap()) {
         parse_hook_config(node["hooks"], defs.hooks);
     }
@@ -125,7 +128,26 @@ static JobDefaults parse_defaults_node(const YAML::Node& node) {
 
 static void merge_defaults(JobDefaults& target, const JobDefaults& override_defs) {
     if (!override_defs.command.empty()) target.command = override_defs.command;
-    if (!override_defs.args.empty())    target.args    = override_defs.args;
+
+    bool should_append = override_defs.append_args.has_value()
+        ? *override_defs.append_args
+        : target.append_args.value_or(false);
+
+    if (!override_defs.args.empty()) {
+        if (should_append && !target.args.empty()) {
+            target.args = target.args + " " + override_defs.args;
+        } else {
+            target.args = override_defs.args;
+        }
+    }
+
+    if (override_defs.append_args.has_value()) {
+        target.append_args = override_defs.append_args;
+    }
+    if (override_defs.scalable.has_value()) {
+        target.scalable = override_defs.scalable;
+    }
+
     if (!override_defs.hooks.pre.empty()) {
         target.hooks.pre = override_defs.hooks.pre;
         target.hooks.pre_commands = override_defs.hooks.pre_commands;
@@ -141,27 +163,101 @@ static void merge_defaults(JobDefaults& target, const JobDefaults& override_defs
     }
 }
 
-static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& job_counter, const JobDefaults& defaults) {
+static std::string sanitize_identifier(const std::string& input) {
+    std::string out = input;
+    for (char& c : out) {
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-') {
+            c = '_';
+        }
+    }
+    return out;
+}
+
+static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& job_counter, const JobDefaults& defaults, size_t count_multiplier) {
     std::string base_name = jnode["name"] ? jnode["name"].as<std::string>() : "job";
     if (jnode["backend"]) {
         throw ConfigurationError("Configuration error: 'backend' cannot be configured per job ('" + base_name + "'). The execution backend is a pipeline configuration defined under 'settings.backend'.");
+    }
+    if (jnode["seed"] || jnode["seeds"]) {
+        throw ConfigurationError("Configuration error: 'seed' and 'seeds' have been removed. Use 'variables: { SEED: <val> }' for explicit seeds, 'matrix: { SEED: [<val1>, <val2>] }' for seed parameter sweeps, or 'count: N' for replicated runs.");
     }
     std::string command = jnode["command"] ? jnode["command"].as<std::string>() : defaults.command;
     std::string enabled_if = jnode["enabled_if"] ? jnode["enabled_if"].as<std::string>() : "";
     bool allow_failure = jnode["allow_failure"] ? jnode["allow_failure"].as<bool>() : false;
 
-    bool has_count = jnode["count"].IsDefined();
-    bool has_seed = jnode["seed"].IsDefined();
-    bool has_seeds = jnode["seeds"].IsDefined();
-
-    // Mutual exclusivity checks
-    if (has_count && (has_seed || has_seeds)) {
-        throw ConfigurationError("Configuration error: Job '" + base_name +
-                                 "' cannot specify both 'count' and 'seed'/'seeds' (they are mutually exclusive).");
+    std::optional<bool> job_append_args;
+    if (jnode["append_args"]) {
+        job_append_args = jnode["append_args"].as<bool>();
     }
-    if (has_seed && has_seeds) {
-        throw ConfigurationError("Configuration error: Job '" + base_name +
-                                 "' cannot specify both 'seed' and 'seeds'.");
+    bool should_append = job_append_args.has_value()
+        ? *job_append_args
+        : defaults.append_args.value_or(false);
+
+    std::string final_args;
+    if (jnode["args"]) {
+        std::string j_args = jnode["args"].as<std::string>();
+        if (should_append) {
+            if (!defaults.args.empty() && !j_args.empty()) {
+                final_args = defaults.args + " " + j_args;
+            } else if (!j_args.empty()) {
+                final_args = j_args;
+            } else {
+                final_args = defaults.args;
+            }
+        } else {
+            final_args = j_args;
+        }
+    } else {
+        final_args = defaults.args;
+    }
+
+    std::optional<bool> job_scalable;
+    if (jnode["scalable"]) {
+        job_scalable = jnode["scalable"].as<bool>();
+    }
+    bool is_scalable = job_scalable.has_value()
+        ? *job_scalable
+        : defaults.scalable.value_or(true);
+
+    bool has_count = jnode["count"].IsDefined();
+    int count_val = 1;
+    if (has_count) {
+        count_val = jnode["count"].as<int>();
+        if (count_val <= 0) {
+            throw ConfigurationError("Configuration error: Job '" + base_name + "' count must be greater than 0.");
+        }
+    }
+    size_t effective_count = has_count ? (is_scalable ? (count_val * count_multiplier) : count_val) : 1;
+
+    bool has_matrix = jnode["matrix"].IsDefined();
+    std::vector<std::string> matrix_keys;
+    std::vector<std::vector<std::string>> matrix_values;
+    if (has_matrix) {
+        if (!jnode["matrix"].IsMap()) {
+            throw ConfigurationError("Configuration error: Job '" + base_name + "' matrix must be a mapping of variable names to lists of values.");
+        }
+        for (auto it = jnode["matrix"].begin(); it != jnode["matrix"].end(); ++it) {
+            std::string var_name = it->first.as<std::string>();
+            if (!is_valid_identifier(var_name)) {
+                throw ConfigurationError("Configuration error: Matrix variable name '" + var_name + "' violates identifier rules.");
+            }
+            std::vector<std::string> vals;
+            if (it->second.IsSequence()) {
+                for (const auto& item : it->second) {
+                    vals.push_back(item.as<std::string>());
+                }
+            } else if (it->second.IsScalar()) {
+                vals.push_back(it->second.as<std::string>());
+            }
+            if (vals.empty()) {
+                throw ConfigurationError("Configuration error: Matrix variable '" + var_name + "' must contain at least one value.");
+            }
+            matrix_keys.push_back(var_name);
+            matrix_values.push_back(vals);
+        }
+        if (matrix_keys.empty()) {
+            throw ConfigurationError("Configuration error: Job '" + base_name + "' matrix cannot be empty.");
+        }
     }
 
     auto apply_job_defaults = [&](JobConfig& job) {
@@ -171,10 +267,8 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
         }
         job.variables["JOB_NAME"] = job.name;
         job.variables["TEST_NAME"] = base_name;
-        if (jnode["args"]) {
-            job.variables["ARGS"] = jnode["args"].as<std::string>();
-        } else if (!defaults.args.empty()) {
-            job.variables["ARGS"] = defaults.args;
+        if (!final_args.empty()) {
+            job.variables["ARGS"] = final_args;
         }
         if (jnode["variables"] && jnode["variables"].IsMap()) {
             for (auto it = jnode["variables"].begin(); it != jnode["variables"].end(); ++it) {
@@ -191,42 +285,89 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
             job.hooks.always = defaults.hooks.always;
             job.hooks.allow_failure = defaults.hooks.allow_failure;
         }
+        if (job_append_args.has_value()) {
+            job.append_args = job_append_args;
+        }
+        job.scalable = is_scalable;
+
+        // Auto-append arguments to command if command does not contain ${ARGS}
+        if (!final_args.empty() && job.command.find("${ARGS}") == std::string::npos) {
+            if (job.command.empty()) {
+                job.command = final_args;
+            } else {
+                job.command += " " + final_args;
+            }
+        }
     };
 
-    if (has_seeds) {
-        std::vector<int> seed_list;
-        if (jnode["seeds"].IsSequence()) {
-            for (const auto& s : jnode["seeds"]) {
-                seed_list.push_back(s.as<int>());
+    if (has_matrix) {
+        std::vector<std::unordered_map<std::string, std::string>> combinations;
+        std::function<void(size_t, std::unordered_map<std::string, std::string>&)> generate_combinations;
+        generate_combinations = [&](size_t depth, std::unordered_map<std::string, std::string>& current) {
+            if (depth == matrix_keys.size()) {
+                combinations.push_back(current);
+                return;
             }
-        } else if (jnode["seeds"].IsScalar()) {
-            seed_list.push_back(jnode["seeds"].as<int>());
-        }
+            const auto& key = matrix_keys[depth];
+            for (const auto& val : matrix_values[depth]) {
+                current[key] = val;
+                generate_combinations(depth + 1, current);
+            }
+        };
+        std::unordered_map<std::string, std::string> initial;
+        generate_combinations(0, initial);
 
-        for (int s_val : seed_list) {
-            JobConfig job;
-            std::ostringstream id_ss;
-            id_ss << std::setw(4) << std::setfill('0') << job_counter++;
-            job.job_id = id_ss.str();
-            job.stage_name = stage.name;
-            job.name = base_name + "_seed_" + std::to_string(s_val);
-            job.command = command;
-            job.enabled_if = enabled_if;
-            job.allow_failure = allow_failure;
-            parse_job_deps(jnode, job);
-            parse_job_hooks(jnode, job);
-            job.seed = s_val;
-            apply_job_defaults(job);
-            job.variables["SEED"] = std::to_string(s_val);
-            stage.jobs.push_back(job);
+        for (size_t comb_idx = 0; comb_idx < combinations.size(); ++comb_idx) {
+            const auto& comb = combinations[comb_idx];
+            std::string comb_suffix = "";
+            for (const auto& key : matrix_keys) {
+                comb_suffix += "_" + key + "_" + sanitize_identifier(comb.at(key));
+            }
+            std::string comb_name = base_name + comb_suffix;
+
+            if (has_count) {
+                for (size_t i = 0; i < effective_count; ++i) {
+                    JobConfig job;
+                    std::ostringstream id_ss;
+                    id_ss << std::setw(4) << std::setfill('0') << job_counter++;
+                    job.job_id = id_ss.str();
+                    job.stage_name = stage.name;
+                    job.name = (effective_count > 1) ? (comb_name + "_" + std::to_string(i)) : comb_name;
+                    job.command = command;
+                    job.enabled_if = enabled_if;
+                    job.allow_failure = allow_failure;
+                    parse_job_deps(jnode, job);
+                    parse_job_hooks(jnode, job);
+                    job.count = effective_count;
+                    apply_job_defaults(job);
+                    for (const auto& [mk, mv] : comb) {
+                        job.variables[mk] = mv;
+                    }
+                    job.variables["INDEX"] = std::to_string(i);
+                    stage.jobs.push_back(job);
+                }
+            } else {
+                JobConfig job;
+                std::ostringstream id_ss;
+                id_ss << std::setw(4) << std::setfill('0') << job_counter++;
+                job.job_id = id_ss.str();
+                job.stage_name = stage.name;
+                job.name = comb_name;
+                job.command = command;
+                job.enabled_if = enabled_if;
+                job.allow_failure = allow_failure;
+                parse_job_deps(jnode, job);
+                parse_job_hooks(jnode, job);
+                apply_job_defaults(job);
+                for (const auto& [mk, mv] : comb) {
+                    job.variables[mk] = mv;
+                }
+                job.variables["INDEX"] = std::to_string(comb_idx);
+                stage.jobs.push_back(job);
+            }
         }
     } else if (has_count) {
-        int count_val = jnode["count"].as<int>();
-        if (count_val <= 0) {
-            throw ConfigurationError("Configuration error: Job '" + base_name + "' count must be greater than 0.");
-        }
-
-        for (int i = 0; i < count_val; ++i) {
+        for (size_t i = 0; i < effective_count; ++i) {
             JobConfig job;
             std::ostringstream id_ss;
             id_ss << std::setw(4) << std::setfill('0') << job_counter++;
@@ -238,29 +379,12 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
             job.allow_failure = allow_failure;
             parse_job_deps(jnode, job);
             parse_job_hooks(jnode, job);
-            job.count = count_val;
+            job.count = effective_count;
             apply_job_defaults(job);
             job.variables["INDEX"] = std::to_string(i);
             job.variables["SEED"] = std::to_string(i + 1);
             stage.jobs.push_back(job);
         }
-    } else if (has_seed) {
-        int s_val = jnode["seed"].as<int>();
-        JobConfig job;
-        std::ostringstream id_ss;
-        id_ss << std::setw(4) << std::setfill('0') << job_counter++;
-        job.job_id = id_ss.str();
-        job.stage_name = stage.name;
-        job.name = base_name;
-        job.command = command;
-        job.enabled_if = enabled_if;
-        job.allow_failure = allow_failure;
-        parse_job_deps(jnode, job);
-        parse_job_hooks(jnode, job);
-        job.seed = s_val;
-        apply_job_defaults(job);
-        job.variables["SEED"] = std::to_string(s_val);
-        stage.jobs.push_back(job);
     } else {
         JobConfig job;
         std::ostringstream id_ss;
@@ -296,7 +420,7 @@ void YamlParser::populate_default_backends(PipelineConfig& config, const std::st
     }
 }
 
-PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std::string& base_dir) {
+PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std::string& base_dir, size_t cli_count_multiplier) {
     YAML::Node root;
     try {
         root = YAML::Load(std::string(yaml_content));
@@ -307,6 +431,9 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
     if (!root || !root.IsMap()) {
         throw ConfigurationError("Invalid YAML configuration: root must be a mapping.");
     }
+
+    // Validate YAML specification against Declarative JSON Schema
+    validate_yaml_schema(root);
 
     PipelineConfig config;
     populate_default_backends(config, base_dir);
@@ -332,9 +459,6 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
             top_includes.push_back(root["include"].as<std::string>());
         }
     }
-    if (root["includes"] && root["includes"].IsSequence()) {
-        for (const auto& it : root["includes"]) top_includes.push_back(it.as<std::string>());
-    }
     config.includes = top_includes;
 
     // Parse global pipeline defaults
@@ -345,9 +469,6 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
             if (snode["hooks"] && snode["hooks"].IsMap()) {
                 parse_hook_config(snode["hooks"], config.stage_defaults.hooks);
             }
-        }
-        if (dnode["stage_hooks"] && dnode["stage_hooks"].IsMap()) {
-            parse_hook_config(dnode["stage_hooks"], config.stage_defaults.hooks);
         }
 
         if (dnode["job"] && dnode["job"].IsMap()) {
@@ -394,22 +515,21 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         if (s["backend"]) {
             config.settings.backend = s["backend"].as<std::string>();
             config.settings.default_backend = config.settings.backend;
-        } else if (s["default_backend"]) {
-            config.settings.backend = s["default_backend"].as<std::string>();
-            config.settings.default_backend = config.settings.backend;
         }
         if (s["output_mode"]) {
             config.settings.output_mode = parse_output_mode(s["output_mode"].as<std::string>());
-        } else if (s["terminal_output"]) {
-            config.settings.output_mode = parse_output_mode(s["terminal_output"].as<std::string>());
         }
         if (s["path_style"]) {
             config.settings.path_style = parse_path_style(s["path_style"].as<std::string>());
-        } else if (s["path_mode"]) {
-            config.settings.path_style = parse_path_style(s["path_mode"].as<std::string>());
-        } else if (s["relative_paths"]) {
-            config.settings.path_style = s["relative_paths"].as<bool>() ? PathStyle::RELATIVE : PathStyle::ABSOLUTE;
         }
+        if (s["count_multiplier"]) {
+            config.settings.count_multiplier = s["count_multiplier"].as<size_t>();
+            if (config.settings.count_multiplier == 0) config.settings.count_multiplier = 1;
+        }
+    }
+
+    if (cli_count_multiplier > 0) {
+        config.settings.count_multiplier = cli_count_multiplier;
     }
 
     if (config.settings.max_parallel_jobs == 0) {
@@ -452,22 +572,9 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         }
     }
 
-    // Legacy / alias support for stage_defaults: at root
-    if (root["stage_defaults"] && root["stage_defaults"].IsMap()) {
-        const auto& sd = root["stage_defaults"];
-        if (sd["hooks"] && sd["hooks"].IsMap()) {
-            parse_hook_config(sd["hooks"], config.stage_defaults.hooks);
-        }
-    }
-
-    // Parse global pipeline hooks (supports both flat 'hooks: { pre: ... }' and 'hooks: { pipeline: { pre: ... } }')
+    // Parse global pipeline hooks
     if (root["hooks"] && root["hooks"].IsMap()) {
-        const auto& hnode = root["hooks"];
-        if (hnode["pipeline"] && hnode["pipeline"].IsMap()) {
-            parse_hook_config(hnode["pipeline"], config.hooks);
-        } else {
-            parse_hook_config(hnode, config.hooks);
-        }
+        parse_hook_config(root["hooks"], config.hooks);
     }
 
     // Parse stages
@@ -484,11 +591,23 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
 
         StageConfig stage;
         stage.name = snode["name"].as<std::string>();
+
+        // Explicitly reject stage-level command and args
+        if (snode["command"] || snode["args"]) {
+            throw ConfigurationError("Configuration error: 'command' and 'args' cannot be configured directly on stage '" + stage.name +
+                                     "'. Stages are DAG phases with hooks; commands belong to jobs under 'jobs:' or stage defaults under 'defaults:'.");
+        }
+
         stage.defaults = config.defaults;
-        if (snode["defaults"] && snode["defaults"].IsMap()) {
+        if (snode["defaults"]) {
+            if (!snode["defaults"].IsMap()) {
+                throw ConfigurationError("Configuration error: 'defaults' in stage '" + stage.name + "' must be a mapping.");
+            }
             const auto& sdnode = snode["defaults"];
             if (sdnode["job"] && sdnode["job"].IsMap()) {
-                merge_defaults(stage.defaults, parse_defaults_node(sdnode["job"]));
+                JobDefaults base_sd = parse_defaults_node(sdnode);
+                merge_defaults(base_sd, parse_defaults_node(sdnode["job"]));
+                merge_defaults(stage.defaults, base_sd);
             } else {
                 merge_defaults(stage.defaults, parse_defaults_node(sdnode));
             }
@@ -531,9 +650,6 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
                 stage_includes.push_back(snode["include"].as<std::string>());
             }
         }
-        if (snode["includes"] && snode["includes"].IsSequence()) {
-            for (const auto& item : snode["includes"]) stage_includes.push_back(item.as<std::string>());
-        }
 
         for (const auto& inc_file : stage_includes) {
             stage.includes.push_back(inc_file);
@@ -550,16 +666,23 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
 
             JobDefaults inc_defaults = stage.defaults;
             if (inc_node["defaults"] && inc_node["defaults"].IsMap()) {
-                merge_defaults(inc_defaults, parse_defaults_node(inc_node["defaults"]));
+                const auto& ind = inc_node["defaults"];
+                if (ind["job"] && ind["job"].IsMap()) {
+                    JobDefaults base_ind = parse_defaults_node(ind);
+                    merge_defaults(base_ind, parse_defaults_node(ind["job"]));
+                    merge_defaults(inc_defaults, base_ind);
+                } else {
+                    merge_defaults(inc_defaults, parse_defaults_node(ind));
+                }
             }
 
             if (inc_node["jobs"] && inc_node["jobs"].IsSequence()) {
                 for (const auto& jnode : inc_node["jobs"]) {
-                    parse_job_entry(jnode, stage, job_counter, inc_defaults);
+                    parse_job_entry(jnode, stage, job_counter, inc_defaults, config.settings.count_multiplier);
                 }
             } else if (inc_node.IsSequence()) {
                 for (const auto& jnode : inc_node) {
-                    parse_job_entry(jnode, stage, job_counter, inc_defaults);
+                    parse_job_entry(jnode, stage, job_counter, inc_defaults, config.settings.count_multiplier);
                 }
             }
         }
@@ -568,32 +691,52 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         if (snode["jobs"] && snode["jobs"].IsSequence()) {
             for (const auto& jnode : snode["jobs"]) {
                 if (jnode["include"]) {
-                    std::string inc_file = jnode["include"].as<std::string>();
-                    auto full_path = resolve_include_path(inc_file, base_dir);
-                    if (!std::filesystem::exists(full_path)) {
-                        throw ConfigurationError("Configuration error: Included file not found: '" + inc_file + "'");
+                    std::vector<std::string> job_includes;
+                    if (jnode["include"].IsSequence()) {
+                        for (const auto& item : jnode["include"]) job_includes.push_back(item.as<std::string>());
+                    } else {
+                        job_includes.push_back(jnode["include"].as<std::string>());
                     }
-                    YAML::Node inc_node = YAML::LoadFile(full_path.string());
-                    JobDefaults inc_defaults = stage.defaults;
-                    if (inc_node["defaults"] && inc_node["defaults"].IsMap()) {
-                        merge_defaults(inc_defaults, parse_defaults_node(inc_node["defaults"]));
-                    }
-                    if (inc_node["jobs"] && inc_node["jobs"].IsSequence()) {
-                        for (const auto& ij : inc_node["jobs"]) {
-                            parse_job_entry(ij, stage, job_counter, inc_defaults);
+                    for (const auto& inc_file : job_includes) {
+                        auto full_path = resolve_include_path(inc_file, base_dir);
+                        if (!std::filesystem::exists(full_path)) {
+                            throw ConfigurationError("Configuration error: Included file not found: '" + inc_file + "'");
                         }
-                    } else if (inc_node.IsSequence()) {
-                        for (const auto& ij : inc_node) {
-                            parse_job_entry(ij, stage, job_counter, inc_defaults);
+                        YAML::Node inc_node;
+                        try {
+                            inc_node = YAML::LoadFile(full_path.string());
+                        } catch (const std::exception& e) {
+                            throw ConfigurationError("Configuration error: Failed to parse included file '" + inc_file + "': " + e.what());
+                        }
+                        JobDefaults inc_defaults = stage.defaults;
+                        if (inc_node["defaults"] && inc_node["defaults"].IsMap()) {
+                            const auto& ind = inc_node["defaults"];
+                            if (ind["job"] && ind["job"].IsMap()) {
+                                JobDefaults base_ind = parse_defaults_node(ind);
+                                merge_defaults(base_ind, parse_defaults_node(ind["job"]));
+                                merge_defaults(inc_defaults, base_ind);
+                            } else {
+                                merge_defaults(inc_defaults, parse_defaults_node(ind));
+                            }
+                        }
+                        if (inc_node["jobs"] && inc_node["jobs"].IsSequence()) {
+                            for (const auto& ij : inc_node["jobs"]) {
+                                parse_job_entry(ij, stage, job_counter, inc_defaults, config.settings.count_multiplier);
+                            }
+                        } else if (inc_node.IsSequence()) {
+                            for (const auto& ij : inc_node) {
+                                parse_job_entry(ij, stage, job_counter, inc_defaults, config.settings.count_multiplier);
+                            }
                         }
                     }
                 } else {
-                    parse_job_entry(jnode, stage, job_counter, stage.defaults);
+                    parse_job_entry(jnode, stage, job_counter, stage.defaults, config.settings.count_multiplier);
                 }
             }
-        } else if (snode["command"]) {
-            // Stage-level single job shorthand
-            parse_job_entry(snode, stage, job_counter, stage.defaults);
+        }
+
+        if (stage.jobs.empty()) {
+            throw ConfigurationError("Configuration error: Stage '" + stage.name + "' has no jobs configured. Specify 'jobs:' or 'include:'.");
         }
 
         config.stages.push_back(stage);
@@ -603,7 +746,7 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
     return config;
 }
 
-PipelineConfig YamlParser::parse_file(const std::string& filepath) {
+PipelineConfig YamlParser::parse_file(const std::string& filepath, size_t cli_count_multiplier) {
     std::ifstream file(filepath);
     if (!file) {
         throw ConfigurationError("Could not open pipeline configuration file: " + filepath);
@@ -615,7 +758,7 @@ PipelineConfig YamlParser::parse_file(const std::string& filepath) {
     std::filesystem::path abs_p = std::filesystem::absolute(p, ec);
     std::string base_dir = (ec ? p : abs_p).parent_path().string();
     if (base_dir.empty()) base_dir = ".";
-    auto config = parse_string(buffer.str(), base_dir);
+    auto config = parse_string(buffer.str(), base_dir, cli_count_multiplier);
     if (!config.variables.has("CONDOR_PIPELINE_FILE")) {
         config.variables.set("CONDOR_PIPELINE_FILE", (ec ? p : abs_p).string());
     }

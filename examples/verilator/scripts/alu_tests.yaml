@@ -26,6 +26,7 @@ jobs:
   - name: zero_flag
   - name: boundary
   - name: fuzz
-    seeds: [42, 1337, 2024]
+    matrix:
+      SEED: [42, 1337, 2024]
   - name: comparison
   - name: pipeline_stress

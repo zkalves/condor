@@ -31,14 +31,13 @@ defaults:
 stages:
   # Stage demonstrating test replication with count: 4
   - name: stress_matrix
-    defaults:
-      variables:
-        ITERATIONS: "2000"
     jobs:
       - name: parallel_stress
         count: 4
+        variables:
+          ITERATIONS: "2000"
 
-  # Stage demonstrating external test suite inclusion and seeds parameter sweeps
+  # Stage demonstrating external test suite inclusion and matrix parameter sweeps
   - name: parameter_sweep
     depends_on: [stress_matrix]
     include: "test_suite.yaml"
@@ -46,4 +45,6 @@ stages:
   # Summary report stage
   - name: summary
     depends_on: [parameter_sweep]
-    command: "bash ${CONDOR_PIPELINE_DIR}/report.sh"
+    jobs:
+      - name: generate_report
+        command: "bash ${CONDOR_PIPELINE_DIR}/report.sh"

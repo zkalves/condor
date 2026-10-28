@@ -50,10 +50,14 @@ stages:
         command: "echo $CONDOR_VAR_SEED > seed.txt && echo $CONDOR_JOB_ID > jid.txt"
   - name: stage_skipped
     enabled_if: "${coverage} == '1'"
-    command: "touch skipped.txt"
+    jobs:
+      - name: skip_job
+        command: "touch skipped.txt"
   - name: stage_dependent
     depends_on: [stage_skipped]
-    command: "echo 'dependent ran' > dep.txt"
+    jobs:
+      - name: dep_job
+        command: "echo 'dependent ran' > dep.txt"
 )";
 
     std::string test_dir = "./test_pipe_env";
@@ -144,15 +148,15 @@ stages:
 }
 
 TEST_CASE(output_mode_yaml_parsing) {
-    std::string yaml_mode_all = "settings:\n  output_mode: all\nstages:\n  - name: s1\n    command: echo 1\n";
+    std::string yaml_mode_all = "settings:\n  output_mode: all\nstages:\n  - name: s1\n    jobs:\n      - name: j1\n        command: echo 1\n";
     auto c1 = YamlParser::parse_string(yaml_mode_all);
     ASSERT_TRUE(c1.settings.output_mode == OutputMode::ALL);
 
-    std::string yaml_mode_fail = "settings:\n  terminal_output: failures\nstages:\n  - name: s1\n    command: echo 1\n";
+    std::string yaml_mode_fail = "settings:\n  output_mode: failures\nstages:\n  - name: s1\n    jobs:\n      - name: j1\n        command: echo 1\n";
     auto c2 = YamlParser::parse_string(yaml_mode_fail);
     ASSERT_TRUE(c2.settings.output_mode == OutputMode::FAILURES);
 
-    std::string yaml_mode_summary = "settings:\n  output_mode: summary\nstages:\n  - name: s1\n    command: echo 1\n";
+    std::string yaml_mode_summary = "settings:\n  output_mode: summary\nstages:\n  - name: s1\n    jobs:\n      - name: j1\n        command: echo 1\n";
     auto c3 = YamlParser::parse_string(yaml_mode_summary);
     ASSERT_TRUE(c3.settings.output_mode == OutputMode::SUMMARY);
 }

@@ -37,12 +37,12 @@ stages:
   # Stage 2 executes on the configured grid_cluster backend
   - name: distributed_compute
     depends_on: [prepare]
-    defaults:
-      command: "bash ${CONDOR_PIPELINE_DIR}/workload.sh"
     jobs:
       - name: matrix_partition_0
+        command: "bash ${CONDOR_PIPELINE_DIR}/workload.sh"
         depends_on: ["prepare/0002"]       # Job-level dependency on stage_inputs
       - name: matrix_partition_1
+        command: "bash ${CONDOR_PIPELINE_DIR}/workload.sh"
         depends_on: ["prepare/0002"]
       - name: sanity_probe
         command: "echo '[GRID] Performing sanity check on cluster worker slot...'"
@@ -50,4 +50,6 @@ stages:
   # Stage 3 aggregates results locally
   - name: finalize
     depends_on: [distributed_compute]
-    command: "echo '[LOCAL] All grid cluster tasks successfully completed. Pipeline finalized.'"
+    jobs:
+      - name: finalize_pipeline
+        command: "echo '[LOCAL] All grid cluster tasks successfully completed. Pipeline finalized.'"

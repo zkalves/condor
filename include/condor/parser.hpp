@@ -38,19 +38,21 @@ public:
     /**
      * @brief Parses a pipeline YAML configuration file from disk.
      * @param filepath Path to the root YAML configuration file.
+     * @param cli_count_multiplier Optional CLI count multiplier override (default: 0 = unconfigured).
      * @return Complete, validated PipelineConfig data model.
      * @throws ConfigurationError If file cannot be read, syntax is invalid, or cyclic dependencies exist.
      */
-    static PipelineConfig parse_file(const std::string& filepath);
+    static PipelineConfig parse_file(const std::string& filepath, size_t cli_count_multiplier = 0);
 
     /**
      * @brief Parses a pipeline configuration from an in-memory YAML string.
      * @param yaml_content In-memory YAML content to parse.
      * @param base_dir Directory used to resolve relative file includes (default: ".").
+     * @param cli_count_multiplier Optional CLI count multiplier override (default: 0 = unconfigured).
      * @return Complete, validated PipelineConfig data model.
      * @throws ConfigurationError If syntax is invalid or configuration rules are violated.
      */
-    static PipelineConfig parse_string(std::string_view yaml_content, const std::string& base_dir = ".");
+    static PipelineConfig parse_string(std::string_view yaml_content, const std::string& base_dir = ".", size_t cli_count_multiplier = 0);
 
     /**
      * @brief Validates identifiers, variables, backend assignments, and dependency references in a pipeline model.
