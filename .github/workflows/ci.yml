@@ -42,7 +42,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload Binaries Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: condor-binaries
           path: |
@@ -71,7 +71,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Download Binaries
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: condor-binaries
           path: build
