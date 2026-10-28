@@ -48,7 +48,7 @@ tar -xzf condor-1.0.0-Linux.tar.gz
 sudo cp -r condor-1.0.0-Linux/usr/* /usr/local/
 ```
 
-### Option B: Debian / Ubuntu Package (`.deb`)
+### Option B: Debian / Ubuntu Package (.deb)
 
 Installs `condor` system-wide into `/usr/bin/condor` along with manual pages, example pipelines, and offline documentation:
 
@@ -64,7 +64,7 @@ sudo dpkg -i condor_1.0.0_amd64.deb
 condor --version
 ```
 
-### Option C: Fedora / RHEL 9 / Rocky Linux / openSUSE (`.rpm`)
+### Option C: Fedora / RHEL 9 / Rocky Linux / openSUSE (.rpm)
 
 Install the Enterprise Linux RPM package using `dnf`, `yum`, or `zypper`:
 
@@ -216,14 +216,17 @@ sudo apt-get install -y build-essential cmake git
 
 ## 4. Compiling and Installing from Source
 
-Condor incorporates an **offline-first build flow** that compiles completely without network access using local vendored dependencies in `third_party/`:
+Condor supports both standard online builds (auto-fetching dependencies via CMake `FetchContent` or using system libraries) and an **offline-first build flow** using local vendored dependencies in `third_party/`:
 
 ```bash
 # 1. Clone repository
 git clone https://github.com/zkalves/condor.git
 cd condor
 
-# 2. Build offline with Make (defaults to release binary in build/condor)
+# 2. Build with Make (automatically resolves CLI11 and yaml-cpp)
+make build
+
+# Or for air-gapped offline builds (after running 'make download-deps' on staging machine):
 make build-offline
 
 # 3. Run verification test suite

@@ -23,7 +23,7 @@ DESTDIR      ?=
 # Without a target, default to showing the help menu with all available targets
 .DEFAULT_GOAL := help
 
-.PHONY: help all build-offline build-custom test test-verbose \
+.PHONY: help all build build-offline build-custom download-deps vendor-deps test test-verbose \
         dry-run run-simple run-conditional run-coverage run-ci \
         run-verilator run-verilator-coverage \
         docs docs-doxygen docs-serve clean-docs \
@@ -40,9 +40,11 @@ help: ## Show this help message with all available targets
 	@echo "Usage: make [target] [VARIABLE=value]"
 	@echo ""
 	@echo "Build Flows:"
+	@echo "  build                Build Condor (auto-detects local third_party, system, or FetchContent)"
 	@echo "  build-offline        Build using local third_party/ (offline flow, zero network)"
 	@echo "  build-custom         Build using FetchContent/system packages (custom/online flow)"
-	@echo "  all                  Alias for build-offline"
+	@echo "  download-deps        Fetch dependencies into third_party/ for offline development"
+	@echo "  all                  Alias for build"
 	@echo ""
 	@echo "Test Flows:"
 	@echo "  test                 Run test suite via CTest"
@@ -88,7 +90,13 @@ help: ## Show this help message with all available targets
 # ------------------------------------------------------------------------------
 # Build Flows
 # ------------------------------------------------------------------------------
-all: build-offline ## Alias for build-offline
+all: build ## Alias for build
+
+build: ## Build Condor (auto-detects local third_party, system packages, or FetchContent)
+	@echo "==> Building Condor..."
+	@cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+	@cmake --build $(BUILD_DIR) -j$(JOBS)
+	@echo "==> Build complete: $(CONDOR_BIN)"
 
 build-offline: ## Configure & build using local third_party/ (offline flow, zero network)
 	@echo "==> Building Condor [Offline Flow]..."
@@ -101,6 +109,24 @@ build-custom: ## Configure & build using FetchContent/system packages (custom/on
 	@cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DCONDOR_USE_LOCAL_DEPS=OFF
 	@cmake --build $(BUILD_DIR) -j$(JOBS)
 	@echo "==> Build complete: $(CONDOR_BIN)"
+
+download-deps vendor-deps: ## Fetch dependencies into third_party/ for offline development
+	@mkdir -p third_party
+	@if [ ! -d "third_party/CLI11" ]; then \
+		echo "==> Fetching CLI11 (v2.6.0) into third_party/CLI11..."; \
+		git clone --depth 1 --branch v2.6.0 https://github.com/CLIUtils/CLI11.git third_party/CLI11; \
+	fi
+	@if [ ! -d "third_party/yaml-cpp" ]; then \
+		echo "==> Fetching yaml-cpp (0.9.0) into third_party/yaml-cpp..."; \
+		git clone --depth 1 --branch yaml-cpp-0.9.0 https://github.com/jbeder/yaml-cpp.git third_party/yaml-cpp; \
+	fi
+	@echo "==> Dependencies successfully downloaded to third_party/"
+
+$(CONDOR_BIN):
+	@$(MAKE) build
+
+$(TEST_BIN):
+	@$(MAKE) build
 
 # ------------------------------------------------------------------------------
 # Test Flows

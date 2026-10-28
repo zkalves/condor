@@ -47,12 +47,48 @@ static std::filesystem::path resolve_include_path(const std::string& inc_path, c
     return cand;
 }
 
+static std::string parse_hook_command_field(const YAML::Node& node, std::vector<std::string>& out_cmds) {
+    out_cmds.clear();
+    if (!node) return "";
+    if (node.IsScalar()) {
+        std::string cmd = node.as<std::string>();
+        if (!cmd.empty()) out_cmds.push_back(cmd);
+        return cmd;
+    }
+    if (node.IsSequence()) {
+        std::string combined;
+        for (const auto& item : node) {
+            std::string cmd = item.as<std::string>();
+            if (!cmd.empty()) {
+                out_cmds.push_back(cmd);
+                if (!combined.empty()) combined += "\n";
+                combined += cmd;
+            }
+        }
+        return combined;
+    }
+    return "";
+}
+
+static void parse_hook_config(const YAML::Node& node, HookConfig& hook) {
+    if (!node || !node.IsMap()) return;
+    if (node["pre"]) {
+        hook.pre = parse_hook_command_field(node["pre"], hook.pre_commands);
+    }
+    if (node["post"]) {
+        hook.post = parse_hook_command_field(node["post"], hook.post_commands);
+    }
+    if (node["always"]) {
+        hook.always = node["always"].as<bool>();
+    }
+    if (node["allow_failure"]) {
+        hook.allow_failure = node["allow_failure"].as<bool>();
+    }
+}
+
 static void parse_job_hooks(const YAML::Node& jnode, JobConfig& job) {
     if (jnode["hooks"] && jnode["hooks"].IsMap()) {
-        const auto& jh = jnode["hooks"];
-        if (jh["pre"])    job.hooks.pre    = jh["pre"].as<std::string>();
-        if (jh["post"])   job.hooks.post   = jh["post"].as<std::string>();
-        if (jh["always"]) job.hooks.always = jh["always"].as<bool>();
+        parse_hook_config(jnode["hooks"], job.hooks);
     }
 }
 
@@ -71,14 +107,13 @@ static void parse_job_deps(const YAML::Node& jnode, JobConfig& job) {
 static JobDefaults parse_defaults_node(const YAML::Node& node) {
     JobDefaults defs;
     if (!node || !node.IsMap()) return defs;
+    if (node["backend"]) {
+        throw ConfigurationError("Configuration error: 'backend' cannot be configured in defaults. The execution backend is a pipeline configuration defined under 'settings.backend'.");
+    }
     if (node["command"]) defs.command = node["command"].as<std::string>();
-    if (node["backend"]) defs.backend = node["backend"].as<std::string>();
     if (node["args"])    defs.args    = node["args"].as<std::string>();
     if (node["hooks"] && node["hooks"].IsMap()) {
-        const auto& h = node["hooks"];
-        if (h["pre"])    defs.hooks.pre    = h["pre"].as<std::string>();
-        if (h["post"])   defs.hooks.post   = h["post"].as<std::string>();
-        if (h["always"]) defs.hooks.always = h["always"].as<bool>();
+        parse_hook_config(node["hooks"], defs.hooks);
     }
     if (node["variables"] && node["variables"].IsMap()) {
         for (auto it = node["variables"].begin(); it != node["variables"].end(); ++it) {
@@ -90,11 +125,17 @@ static JobDefaults parse_defaults_node(const YAML::Node& node) {
 
 static void merge_defaults(JobDefaults& target, const JobDefaults& override_defs) {
     if (!override_defs.command.empty()) target.command = override_defs.command;
-    if (!override_defs.backend.empty()) target.backend = override_defs.backend;
     if (!override_defs.args.empty())    target.args    = override_defs.args;
-    if (!override_defs.hooks.pre.empty()) target.hooks.pre = override_defs.hooks.pre;
-    if (!override_defs.hooks.post.empty()) target.hooks.post = override_defs.hooks.post;
-    if (override_defs.hooks.always) target.hooks.always = override_defs.hooks.always;
+    if (!override_defs.hooks.pre.empty()) {
+        target.hooks.pre = override_defs.hooks.pre;
+        target.hooks.pre_commands = override_defs.hooks.pre_commands;
+    }
+    if (!override_defs.hooks.post.empty()) {
+        target.hooks.post = override_defs.hooks.post;
+        target.hooks.post_commands = override_defs.hooks.post_commands;
+        target.hooks.always = override_defs.hooks.always;
+        target.hooks.allow_failure = override_defs.hooks.allow_failure;
+    }
     for (const auto& [k, v] : override_defs.variables) {
         target.variables[k] = v;
     }
@@ -102,8 +143,10 @@ static void merge_defaults(JobDefaults& target, const JobDefaults& override_defs
 
 static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& job_counter, const JobDefaults& defaults) {
     std::string base_name = jnode["name"] ? jnode["name"].as<std::string>() : "job";
+    if (jnode["backend"]) {
+        throw ConfigurationError("Configuration error: 'backend' cannot be configured per job ('" + base_name + "'). The execution backend is a pipeline configuration defined under 'settings.backend'.");
+    }
     std::string command = jnode["command"] ? jnode["command"].as<std::string>() : defaults.command;
-    std::string backend = jnode["backend"] ? jnode["backend"].as<std::string>() : defaults.backend;
     std::string enabled_if = jnode["enabled_if"] ? jnode["enabled_if"].as<std::string>() : "";
     bool allow_failure = jnode["allow_failure"] ? jnode["allow_failure"].as<bool>() : false;
 
@@ -140,10 +183,13 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
         }
         if (job.hooks.pre.empty() && !defaults.hooks.pre.empty()) {
             job.hooks.pre = defaults.hooks.pre;
+            job.hooks.pre_commands = defaults.hooks.pre_commands;
         }
         if (job.hooks.post.empty() && !defaults.hooks.post.empty()) {
             job.hooks.post = defaults.hooks.post;
+            job.hooks.post_commands = defaults.hooks.post_commands;
             job.hooks.always = defaults.hooks.always;
+            job.hooks.allow_failure = defaults.hooks.allow_failure;
         }
     };
 
@@ -165,7 +211,6 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
             job.stage_name = stage.name;
             job.name = base_name + "_seed_" + std::to_string(s_val);
             job.command = command;
-            job.backend = backend;
             job.enabled_if = enabled_if;
             job.allow_failure = allow_failure;
             parse_job_deps(jnode, job);
@@ -189,7 +234,6 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
             job.stage_name = stage.name;
             job.name = base_name + "_" + std::to_string(i);
             job.command = command;
-            job.backend = backend;
             job.enabled_if = enabled_if;
             job.allow_failure = allow_failure;
             parse_job_deps(jnode, job);
@@ -209,7 +253,6 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
         job.stage_name = stage.name;
         job.name = base_name;
         job.command = command;
-        job.backend = backend;
         job.enabled_if = enabled_if;
         job.allow_failure = allow_failure;
         parse_job_deps(jnode, job);
@@ -226,7 +269,6 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
         job.stage_name = stage.name;
         job.name = jnode["name"] ? jnode["name"].as<std::string>() : ("job_" + job.job_id);
         job.command = command;
-        job.backend = backend;
         job.enabled_if = enabled_if;
         job.allow_failure = allow_failure;
         parse_job_deps(jnode, job);
@@ -297,7 +339,22 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
 
     // Parse global pipeline defaults
     if (root["defaults"] && root["defaults"].IsMap()) {
-        config.defaults = parse_defaults_node(root["defaults"]);
+        const auto& dnode = root["defaults"];
+        if (dnode["stage"] && dnode["stage"].IsMap()) {
+            const auto& snode = dnode["stage"];
+            if (snode["hooks"] && snode["hooks"].IsMap()) {
+                parse_hook_config(snode["hooks"], config.stage_defaults.hooks);
+            }
+        }
+        if (dnode["stage_hooks"] && dnode["stage_hooks"].IsMap()) {
+            parse_hook_config(dnode["stage_hooks"], config.stage_defaults.hooks);
+        }
+
+        if (dnode["job"] && dnode["job"].IsMap()) {
+            config.defaults = parse_defaults_node(dnode["job"]);
+        } else {
+            config.defaults = parse_defaults_node(dnode);
+        }
     }
 
     // Parse variables
@@ -334,8 +391,12 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         if (s["status_interval_sec"]) {
             config.settings.status_interval_sec = s["status_interval_sec"].as<int>();
         }
-        if (s["default_backend"]) {
-            config.settings.default_backend = s["default_backend"].as<std::string>();
+        if (s["backend"]) {
+            config.settings.backend = s["backend"].as<std::string>();
+            config.settings.default_backend = config.settings.backend;
+        } else if (s["default_backend"]) {
+            config.settings.backend = s["default_backend"].as<std::string>();
+            config.settings.default_backend = config.settings.backend;
         }
         if (s["output_mode"]) {
             config.settings.output_mode = parse_output_mode(s["output_mode"].as<std::string>());
@@ -354,6 +415,11 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
     if (config.settings.max_parallel_jobs == 0) {
         size_t cores = std::thread::hardware_concurrency();
         config.settings.max_parallel_jobs = (cores > 0) ? cores : 4;
+    }
+
+    // Top-level backend is disallowed: backend must be configured under settings.backend
+    if (root["backend"]) {
+        throw ConfigurationError("Configuration error: 'backend' cannot be configured at the top level. The execution backend is a pipeline configuration defined under 'settings.backend'.");
     }
 
     // Parse custom backends
@@ -386,12 +452,22 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         }
     }
 
-    // Parse global pipeline hooks
+    // Legacy / alias support for stage_defaults: at root
+    if (root["stage_defaults"] && root["stage_defaults"].IsMap()) {
+        const auto& sd = root["stage_defaults"];
+        if (sd["hooks"] && sd["hooks"].IsMap()) {
+            parse_hook_config(sd["hooks"], config.stage_defaults.hooks);
+        }
+    }
+
+    // Parse global pipeline hooks (supports both flat 'hooks: { pre: ... }' and 'hooks: { pipeline: { pre: ... } }')
     if (root["hooks"] && root["hooks"].IsMap()) {
-        const auto& h = root["hooks"];
-        if (h["pre"])    config.hooks.pre    = h["pre"].as<std::string>();
-        if (h["post"])   config.hooks.post   = h["post"].as<std::string>();
-        if (h["always"]) config.hooks.always = h["always"].as<bool>();
+        const auto& hnode = root["hooks"];
+        if (hnode["pipeline"] && hnode["pipeline"].IsMap()) {
+            parse_hook_config(hnode["pipeline"], config.hooks);
+        } else {
+            parse_hook_config(hnode, config.hooks);
+        }
     }
 
     // Parse stages
@@ -410,7 +486,12 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         stage.name = snode["name"].as<std::string>();
         stage.defaults = config.defaults;
         if (snode["defaults"] && snode["defaults"].IsMap()) {
-            merge_defaults(stage.defaults, parse_defaults_node(snode["defaults"]));
+            const auto& sdnode = snode["defaults"];
+            if (sdnode["job"] && sdnode["job"].IsMap()) {
+                merge_defaults(stage.defaults, parse_defaults_node(sdnode["job"]));
+            } else {
+                merge_defaults(stage.defaults, parse_defaults_node(sdnode));
+            }
         }
 
         // Strict stage name validation immediately
@@ -419,8 +500,9 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
                                      "' violates identifier rules (must match POSIX-safe regex ^[a-zA-Z0-9_-]+$).");
         }
 
-        if (snode["backend"]) stage.backend = snode["backend"].as<std::string>();
-        else if (!stage.defaults.backend.empty()) stage.backend = stage.defaults.backend;
+        if (snode["backend"]) {
+            throw ConfigurationError("Configuration error: 'backend' cannot be configured per stage ('" + stage.name + "'). The execution backend is a pipeline configuration defined under 'settings.backend'.");
+        }
         if (snode["enabled_if"]) stage.enabled_if = snode["enabled_if"].as<std::string>();
         if (snode["allow_failure"]) stage.allow_failure = snode["allow_failure"].as<bool>();
 
@@ -435,10 +517,9 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         }
 
         if (snode["hooks"] && snode["hooks"].IsMap()) {
-            const auto& sh = snode["hooks"];
-            if (sh["pre"])    stage.hooks.pre    = sh["pre"].as<std::string>();
-            if (sh["post"])   stage.hooks.post   = sh["post"].as<std::string>();
-            if (sh["always"]) stage.hooks.always = sh["always"].as<bool>();
+            parse_hook_config(snode["hooks"], stage.hooks);
+        } else if (!config.stage_defaults.hooks.pre.empty() || !config.stage_defaults.hooks.post.empty()) {
+            stage.hooks = config.stage_defaults.hooks;
         }
 
         // Check if stage includes external file(s) for jobs

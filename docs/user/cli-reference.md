@@ -21,7 +21,7 @@ condor [OPTIONS] <pipeline.yaml>
 | `--max-parallel-jobs` | `<N>` | Hardware concurrency | Maximum concurrent local jobs executed simultaneously. |
 | `--base-output-dir` | `<path>` | `./condor_runs` | Base directory where timestamped run directories are created. |
 | `--run-dir` | `<path>` | Auto-generated | Run inside an explicit fixed directory rather than generating a timestamped folder. |
-| `--backend-override` | `<name>` | Pipeline default | Force all jobs to execute using the specified backend (e.g. `local` or a defined grid backend). |
+| `-b`, `--backend`, `--backend-override` | `<name>` | Pipeline default | Set or override execution backend for all jobs (e.g. `local`, `slurm`, `lsf`, `sge`). |
 | `--on-failure-action`| `abort`, `continue`, `stage_barrier` | `abort` | Override failure handling policy when a job fails. |
 | `--exit-zero-on-failure`| None (Flag) | `false` | Return exit status code `0` even if individual jobs or stages encounter failures. |
 | `--status-interval-sec`| `<seconds>` | `30` | Interval in seconds to output periodic status summary dumps in non-interactive CI mode. |
@@ -40,7 +40,7 @@ condor [OPTIONS] <pipeline.yaml>
 
 ---
 
-## Failure Handling Policies (`--on-failure-action`)
+## Failure Handling Policies (--on-failure-action)
 
 When a job fails without `allow_failure: true`, Condor enforces one of three deterministic failure actions:
 
@@ -53,7 +53,7 @@ When a job fails without `allow_failure: true`, Condor enforces one of three det
 
 ---
 
-## Terminal Output Modes (`--output-mode`)
+## Terminal Output Modes (--output-mode)
 
 Control terminal output verbosity according to your operational environment:
 
@@ -66,7 +66,7 @@ Control terminal output verbosity according to your operational environment:
 
 ---
 
-## Path Style Configuration (`--path-style`)
+## Path Style Configuration (--path-style)
 
 Condor allows choosing between absolute host paths and portable relative run paths:
 
@@ -87,18 +87,24 @@ In relative mode:
 
 ## Interactive Runtime Menu Controls
 
-During live interactive execution on a TTY, Condor listens asynchronously on `stdin` for single-keystroke control commands without interrupting the running jobs:
+During live interactive execution on a TTY, Condor listens asynchronously on `stdin` for keyboard interactions without interrupting active jobs.
 
-| Keystroke | Action | Description |
+Press **`m`** or **`Ctrl+C`** at any time to open the interactive runtime control menu:
+
+| Command | Action | Description |
 | :---: | :--- | :--- |
-| **`p`** | **Pause Dispatch** | Pauses scheduling of newly ready jobs. Currently running jobs continue to completion. |
-| **`r`** | **Resume Dispatch** | Resumes scheduling queued jobs across available worker slots. |
-| **`k`** | **Kill Pipeline** | Sends cancellation signals (`SIGTERM`/`SIGKILL`) to all running jobs and immediately halts. |
-| **`q`** | **Quit Gracefully** | Stops dispatching new jobs and waits for currently running jobs to complete before exiting. |
-| **`?`** or **`h`** | **Show Menu** | Displays interactive help menu overlay. |
+| **`s`** | **Status Table** | Prints an immediate, detailed tabular dump of all stages, jobs, PIDs, grid IDs, and statuses. |
+| **`p`** | **Pause / Resume** | Toggles scheduler dispatching. Pauses new job dispatches or resumes queued dispatches. |
+| **`k <id>`** | **Kill Job** | Terminates an active job by its 4-digit job ID (e.g. `k 0002`). |
+| **`j <N>`** | **Scale Slots** | Dynamically adjusts the maximum concurrent worker slots at runtime (e.g. `j 8`). |
+| **`w`** | **Warranty** | Displays the GNU General Public License warranty disclaimer (§15-17). |
+| **`l`** | **License** | Displays the GNU General Public License redistribution conditions (§4-5). |
+| **`c`** | **Continue** | Resumes the live ANSI progress display. |
+| **`q`** | **Quit / Abort All** | Signals all running process groups (`SIGTERM`/`SIGKILL`) and exits immediately. |
 
-> [!TIP]
-> In automated CI/CD pipelines (such as GitHub Actions, GitLab CI, or Jenkins), pass `--no-interactive` to disable terminal polling and avoid consuming pipeline stdin.
+@note **Emergency Double Ctrl+C**: Pressing `Ctrl+C` twice within 2 seconds bypasses the menu and immediately terminates all active process groups across all worker slots. In automated CI/CD pipelines (such as GitHub Actions, GitLab CI, or Jenkins), pass `--no-interactive` to disable terminal polling and avoid consuming pipeline stdin.
+
+---
 
 ## Built-in Environment Variables
 
@@ -116,5 +122,5 @@ Every job runner script (`job_runner.sh`) and hook script receives the following
 | `TEST_DIR` | Working test directory | `.` | `/home/user/condor_runs/.../sim_tests/0001` |
 | `CONDOR_PATH_STYLE`| Configured path style | `relative` | `absolute` |
 | `CONDOR_OUTPUT_MODE`| Configured output mode | `summary` | `summary` |
-| `CONDOR_PIPELINE_DIR`| Directory containing the pipeline configuration | `../../../../examples/verilator/scripts` | `/home/user/project/examples/verilator/scripts` |
+| `CONDOR_PIPELINE_DIR`| Directory containing the pipeline configuration | `../../../../examples/hardware_test/scripts` | `/home/user/project/examples/hardware_test/scripts` |
 | `CONDOR_VAR_<KEY>` | Exported user and configuration variables | Varies | Varies |

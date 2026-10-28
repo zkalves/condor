@@ -24,6 +24,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <filesystem>
+#include <unordered_set>
 
 namespace condor {
 
@@ -96,6 +97,61 @@ static std::vector<std::pair<std::string, std::string>> extract_yaml_metrics(con
         }
     }
     return metrics;
+}
+
+// Discovers HTML reports generated within the job directory or published via metrics
+static std::vector<std::string> discover_html_reports(const std::filesystem::path& job_dir,
+                                                     const std::vector<std::pair<std::string, std::string>>& metrics) {
+    std::vector<std::string> reports;
+    std::unordered_set<std::string> seen;
+
+    // 1. Check custom metrics for explicit html report links
+    for (const auto& [k, v] : metrics) {
+        std::string lower_v = v;
+        std::transform(lower_v.begin(), lower_v.end(), lower_v.begin(), ::tolower);
+        if (lower_v.size() > 5 && (lower_v.ends_with(".html") || lower_v.ends_with(".htm"))) {
+            std::filesystem::path candidate = v;
+            std::string rel_path;
+            if (candidate.is_absolute()) {
+                std::error_code ec;
+                rel_path = std::filesystem::relative(candidate, job_dir, ec).string();
+                if (ec || rel_path.rfind("..", 0) == 0) {
+                    rel_path = v;
+                }
+            } else {
+                rel_path = v;
+            }
+            if (!seen.count(rel_path)) {
+                reports.push_back(rel_path);
+                seen.insert(rel_path);
+            }
+        }
+    }
+
+    if (!std::filesystem::exists(job_dir)) return reports;
+
+    // 2. Discover .html files within job directory
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(job_dir, std::filesystem::directory_options::skip_permission_denied, ec)) {
+        if (ec) break;
+        if (entry.is_regular_file()) {
+            std::string fname = entry.path().filename().string();
+            std::string ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == ".html" || ext == ".htm") {
+                std::string rel_path = std::filesystem::relative(entry.path(), job_dir, ec).string();
+                if (!ec && !seen.count(rel_path)) {
+                    if (fname == "index.html" || fname.find("cov") != std::string::npos) {
+                        reports.insert(reports.begin(), rel_path);
+                    } else {
+                        reports.push_back(rel_path);
+                    }
+                    seen.insert(rel_path);
+                }
+            }
+        }
+    }
+    return reports;
 }
 
 std::string HtmlReportGenerator::generate(
@@ -585,6 +641,45 @@ std::string HtmlReportGenerator::generate(
             color: var(--text-muted);
             font-family: var(--font-mono);
         }
+        .job-report-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            background: rgba(38, 139, 210, 0.15);
+            border: 1px solid rgba(38, 139, 210, 0.45);
+            border-radius: 4px;
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.15s ease;
+        }
+        .job-report-link:hover {
+            background: var(--accent);
+            color: #ffffff;
+            text-decoration: none;
+            box-shadow: 0 0 6px rgba(38, 139, 210, 0.5);
+        }
+        .job-report-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            background: rgba(38, 139, 210, 0.15);
+            border: 1px solid rgba(38, 139, 210, 0.45);
+            border-radius: 5px;
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.15s ease;
+        }
+        .job-report-btn:hover {
+            background: var(--accent);
+            color: #ffffff;
+            text-decoration: none;
+        }
         .chevron {
             transition: transform 0.2s ease;
             font-size: 12px;
@@ -872,6 +967,31 @@ std::string HtmlReportGenerator::generate(
             <div class="stage-jobs-content">
 )HTML";
 
+        auto stage_dir = workspace.stage_dir(stage.config.name);
+        std::string stage_pre_txt = read_file_preview(stage_dir / "pre_hook.log");
+        std::string stage_post_txt = read_file_preview(stage_dir / "post_hook.log");
+        if (!stage_pre_txt.empty() || !stage_post_txt.empty()) {
+            h << R"HTML(                <div class="stage-hooks-bar" style="margin: 0 0 16px 0; padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 6px;">
+                    <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--text-heading);">&#9881; Stage Lifecycle Hooks</div>
+)HTML";
+            if (!stage_pre_txt.empty()) {
+                h << R"HTML(                    <details style="margin-bottom: 8px;">
+                        <summary style="cursor: pointer; font-size: 12px; font-weight: 500; color: var(--accent); user-select: none;">&#9656; Stage Pre-Hook Output (pre_hook.log)</summary>
+                        <pre class="log-box" style="margin-top: 6px; max-height: 250px;">)HTML" << escape_html(stage_pre_txt) << R"HTML(</pre>
+                    </details>
+)HTML";
+            }
+            if (!stage_post_txt.empty()) {
+                h << R"HTML(                    <details>
+                        <summary style="cursor: pointer; font-size: 12px; font-weight: 500; color: var(--accent); user-select: none;">&#9656; Stage Post-Hook Output (post_hook.log)</summary>
+                        <pre class="log-box" style="margin-top: 6px; max-height: 250px;">)HTML" << escape_html(stage_post_txt) << R"HTML(</pre>
+                    </details>
+)HTML";
+            }
+            h << R"HTML(                </div>
+)HTML";
+        }
+
         for (const auto& jid : stage.job_ids) {
             auto it = jobs.find(jid);
             if (it == jobs.end()) continue;
@@ -890,6 +1010,9 @@ std::string HtmlReportGenerator::generate(
 
             auto job_dir = workspace.job_dir(job.config.stage_name, job.config.job_id);
             auto metrics = extract_yaml_metrics(job_dir);
+            auto html_reports = discover_html_reports(job_dir, metrics);
+            std::string pre_hook_txt = read_file_preview(job_dir / "pre_hook.log");
+            std::string post_hook_txt = read_file_preview(job_dir / "post_hook.log");
             std::string stdout_txt = read_file_preview(job_dir / "stdout.log");
             std::string stderr_txt = read_file_preview(job_dir / "stderr.err");
 
@@ -914,7 +1037,21 @@ std::string HtmlReportGenerator::generate(
                             <span class="job-name">)HTML" << escape_html(job.config.name) << R"HTML(</span>
                         </div>
                         <div class="job-meta-right">
-                            <span>Exit: )HTML" << job.exit_code << R"HTML(</span>
+)HTML";
+            if (!html_reports.empty()) {
+                std::string primary = html_reports.front();
+                std::string r_href;
+                if (primary.find("://") != std::string::npos || primary.front() == '/') {
+                    r_href = primary;
+                } else {
+                    r_href = (std::filesystem::path(job.config.stage_name) / job.config.job_id / primary).string();
+                }
+                h << R"HTML(                            <a href=")HTML" << escape_html(r_href)
+                  << R"HTML(" target="_blank" class="job-report-link" onclick="event.stopPropagation();" title="Open Job HTML Report (")HTML"
+                  << escape_html(primary) << R"HTML(")">&#128196; HTML Report &#8599;</a>
+)HTML";
+            }
+            h << R"HTML(                            <span>Exit: )HTML" << job.exit_code << R"HTML(</span>
                             <span>)HTML" << std::fixed << std::setprecision(3) << job.elapsed_sec << R"HTML(s</span>
                             <span class="chevron">&#9660;</span>
                         </div>
@@ -931,18 +1068,64 @@ std::string HtmlReportGenerator::generate(
                         </div>
 )HTML";
 
+            if (!html_reports.empty()) {
+                h << R"HTML(                        <div class="detail-row">
+                            <div class="detail-label">Generated HTML Reports</div>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+)HTML";
+                for (const auto& rep : html_reports) {
+                    std::string r_href;
+                    if (rep.find("://") != std::string::npos || rep.front() == '/') {
+                        r_href = rep;
+                    } else {
+                        r_href = (std::filesystem::path(job.config.stage_name) / job.config.job_id / rep).string();
+                    }
+                    h << R"HTML(                                <a href=")HTML" << escape_html(r_href)
+                      << R"HTML(" target="_blank" class="job-report-btn">&#128196; View )HTML"
+                      << escape_html(rep) << R"HTML( &#8599;</a>
+)HTML";
+                }
+                h << R"HTML(                            </div>
+                        </div>
+)HTML";
+            }
+
             if (!metrics.empty()) {
                 h << R"HTML(                        <div class="detail-row">
                             <div class="detail-label">Custom Machine Metrics</div>
                             <div class="metrics-grid">
 )HTML";
                 for (const auto& [mk, mv] : metrics) {
+                    std::string lower_mv = mv;
+                    std::transform(lower_mv.begin(), lower_mv.end(), lower_mv.begin(), ::tolower);
+                    bool is_html = (lower_mv.size() > 5 && (lower_mv.ends_with(".html") || lower_mv.ends_with(".htm")));
                     h << R"HTML(                                <div class="metric-item"><span class="metric-key">)HTML"
-                      << escape_html(mk) << R"HTML(:</span><span class="metric-val">)HTML"
-                      << escape_html(mv) << R"HTML(</span></div>
+                      << escape_html(mk) << R"HTML(:</span><span class="metric-val">)HTML";
+                    if (is_html) {
+                        std::string r_href;
+                        if (mv.find("://") != std::string::npos || mv.front() == '/') {
+                            r_href = mv;
+                        } else {
+                            r_href = (std::filesystem::path(job.config.stage_name) / job.config.job_id / mv).string();
+                        }
+                        h << R"HTML(<a href=")HTML" << escape_html(r_href)
+                          << R"HTML(" target="_blank" style="color: var(--accent); text-decoration: underline;">)HTML"
+                          << escape_html(mv) << R"HTML( &#8599;</a>)HTML";
+                    } else {
+                        h << escape_html(mv);
+                    }
+                    h << R"HTML(</span></div>
 )HTML";
                 }
                 h << R"HTML(                            </div>
+                        </div>
+)HTML";
+            }
+
+            if (!pre_hook_txt.empty()) {
+                h << R"HTML(                        <div class="detail-row">
+                            <div class="detail-label">Pre-Hook Output (pre_hook.log)</div>
+                            <pre class="log-box">)HTML" << escape_html(pre_hook_txt) << R"HTML(</pre>
                         </div>
 )HTML";
             }
@@ -959,6 +1142,14 @@ std::string HtmlReportGenerator::generate(
                 h << R"HTML(                        <div class="detail-row">
                             <div class="detail-label">Standard Error (stderr.err)</div>
                             <pre class="log-box stderr">)HTML" << escape_html(stderr_txt) << R"HTML(</pre>
+                        </div>
+)HTML";
+            }
+
+            if (!post_hook_txt.empty()) {
+                h << R"HTML(                        <div class="detail-row">
+                            <div class="detail-label">Post-Hook Output (post_hook.log)</div>
+                            <pre class="log-box">)HTML" << escape_html(post_hook_txt) << R"HTML(</pre>
                         </div>
 )HTML";
             }

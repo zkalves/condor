@@ -46,6 +46,7 @@ struct JobExecutionContext {
     std::string pre_hook;                                         ///< Optional pre-execution hook script.
     std::string post_hook;                                        ///< Optional post-execution hook script.
     bool post_always{false};                                      ///< Whether post-hook runs regardless of job exit code.
+    bool hook_allow_failure{false};                               ///< Whether hook failure should be ignored.
 
     std::string job_dir;                                          ///< Job directory path exposed in environment.
     std::string stage_dir;                                        ///< Stage directory path exposed in environment.

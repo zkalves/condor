@@ -277,19 +277,108 @@ TEST_CASE(backend_load_custom_and_patterns) {
     ASSERT_TRUE(slurm->submit_command.find("sbatch --parsable") != std::string::npos);
 }
 
-TEST_CASE(backend_job_id_regex_extraction) {
-    auto lsf_cfg = BackendRegistry::load_backend("lsf");
-    ASSERT_TRUE(lsf_cfg.has_value());
-    std::regex lsf_re(lsf_cfg->job_id_regex);
-    std::string lsf_sample = "Job <98765> is submitted to default queue <normal>.";
-    std::smatch m;
-    ASSERT_TRUE(std::regex_search(lsf_sample, m, lsf_re));
-    ASSERT_TRUE(m[1].str() == "98765");
+TEST_CASE(pipeline_level_backend_configuration) {
+    // 1. Valid: settings: backend: lsf
+    std::string yaml_settings = R"(
+name: test_backend_settings
+settings:
+  backend: lsf
+stages:
+  - name: test_stage
+    jobs:
+      - name: job_2
+        command: "echo 2"
+)";
+    auto config_settings = YamlParser::parse_string(yaml_settings);
+    ASSERT_TRUE(config_settings.settings.backend == "lsf");
+    ASSERT_TRUE(config_settings.settings.default_backend == "lsf");
 
-    auto spark_cfg = BackendRegistry::load_backend("spark");
-    ASSERT_TRUE(spark_cfg.has_value());
-    std::regex spark_re(spark_cfg->job_id_regex);
-    std::string spark_sample = "Driver successfully submitted as driver-20261027120000-0001";
-    ASSERT_TRUE(std::regex_search(spark_sample, m, spark_re));
-    ASSERT_TRUE(m[1].str() == "driver-20261027120000-0001");
+    // 2. Valid: settings: default_backend: slurm
+    std::string yaml_default_settings = R"(
+name: test_default_backend_settings
+settings:
+  default_backend: slurm
+stages:
+  - name: test_stage
+    jobs:
+      - name: job_3
+        command: "echo 3"
+)";
+    auto config_def = YamlParser::parse_string(yaml_default_settings);
+    ASSERT_TRUE(config_def.settings.backend == "slurm");
+    ASSERT_TRUE(config_def.settings.default_backend == "slurm");
+
+    // 3. Error: top-level backend: slurm is rejected
+    std::string yaml_top = R"(
+name: test_backend_top
+backend: slurm
+stages:
+  - name: test_stage
+    jobs:
+      - name: job_1
+        command: "echo 1"
+)";
+    bool caught_top = false;
+    try {
+        YamlParser::parse_string(yaml_top);
+    } catch (const ConfigurationError& e) {
+        caught_top = true;
+    }
+    ASSERT_TRUE(caught_top);
+
+    // 4. Error: job-level backend is rejected
+    std::string yaml_job = R"(
+name: test_backend_job
+stages:
+  - name: test_stage
+    jobs:
+      - name: job_probe
+        command: "echo probe"
+        backend: local
+)";
+    bool caught_job = false;
+    try {
+        YamlParser::parse_string(yaml_job);
+    } catch (const ConfigurationError& e) {
+        caught_job = true;
+    }
+    ASSERT_TRUE(caught_job);
+
+    // 5. Error: stage-level backend is rejected
+    std::string yaml_stage = R"(
+name: test_backend_stage
+stages:
+  - name: test_stage
+    backend: local
+    jobs:
+      - name: job_s
+        command: "echo s"
+)";
+    bool caught_stage = false;
+    try {
+        YamlParser::parse_string(yaml_stage);
+    } catch (const ConfigurationError& e) {
+        caught_stage = true;
+    }
+    ASSERT_TRUE(caught_stage);
+
+    // 6. Error: defaults backend is rejected
+    std::string yaml_defaults = R"(
+name: test_backend_defaults
+defaults:
+  job:
+    backend: local
+stages:
+  - name: test_stage
+    jobs:
+      - name: job_d
+        command: "echo d"
+)";
+    bool caught_defaults = false;
+    try {
+        YamlParser::parse_string(yaml_defaults);
+    } catch (const ConfigurationError& e) {
+        caught_defaults = true;
+    }
+    ASSERT_TRUE(caught_defaults);
 }

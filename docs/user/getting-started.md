@@ -1,6 +1,6 @@
 # Getting Started {#getting_started}
 
-Welcome to **Condor**! This guide assists you in getting started quickly with Condor, whether you prefer installing pre-compiled distribution packages (zero build tools required) or compiling from source.
+Welcome to **Condor** (**Con**current + **D**ependency + **Or**chestrator)! This guide assists you in getting started quickly with Condor, whether you prefer installing pre-compiled distribution packages (zero build tools required) or compiling from source.
 
 ---
 
@@ -36,7 +36,7 @@ tar -xzf condor-1.0.0-Linux.tar.gz
 sudo cp -r condor-1.0.0-Linux/usr/* /usr/local/
 ```
 
-### Option B: Debian / Ubuntu Package (`.deb`)
+### Option B: Debian / Ubuntu Package (.deb)
 
 Installs `condor` system-wide with man pages, example workflows, and offline documentation:
 
@@ -52,7 +52,7 @@ sudo dpkg -i condor_1.0.0_amd64.deb
 condor --version
 ```
 
-### Option C: Fedora / RHEL 9 / Rocky Linux / openSUSE (`.rpm`)
+### Option C: Fedora / RHEL 9 / Rocky Linux / openSUSE (.rpm)
 
 Installs `condor` system-wide using your distribution's native package manager:
 
@@ -113,8 +113,7 @@ module load condor/1.0.0
 condor --version
 ```
 
-> [!TIP]
-> For the complete distribution compatibility matrix, glibc baselines, and packaging details, see the [Supported Operating Systems & Compatibility Matrix Guide](@ref supported_os).
+@note For the complete distribution compatibility matrix, glibc baselines, and packaging details, see the [Supported Operating Systems & Compatibility Matrix Guide](@ref supported_os).
 
 ---
 
@@ -125,7 +124,10 @@ Follow these steps if you wish to compile **Condor** from source code or contrib
 ### Build Toolchain & System Prerequisites
 - **C++ Compiler**: Modern C++20 compiler (`g++` 11+ or `clang++` 13+)
 - **Build System**: CMake 3.20+ and `make` (or `ninja`)
-- **Third-Party Libraries**: None required (`CLI11` and `yaml-cpp` are bundled in `third_party/`)
+- **Third-Party C++ Dependencies**: Condor relies on `CLI11` (v2.6+) and `yaml-cpp` (v0.9+). They are resolved automatically during build:
+  - **Automatic Download (Default)**: CMake uses `FetchContent` to download and build them on first compilation with zero configuration needed.
+  - **System Packages**: Can be installed via system package manager (e.g. `libyaml-cpp-dev` & `libcli11-dev` on Debian/Ubuntu, `yaml-cpp-devel` & `cli11-devel` on Fedora/RHEL).
+  - **Local Offline Vendoring**: For strictly air-gapped environments without network access, run `make download-deps` (which fetches them into `third_party/`, a git-ignored directory). CMake will automatically detect them locally.
 
 ### Installing Build Dependencies Across Operating Systems
 
@@ -187,15 +189,18 @@ sudo apt-get install -y build-essential cmake git
 
 ## 3. Building and Installing
 
-Condor features an **offline-first build flow** that compiles with zero network access using local vendored dependencies:
+Condor supports multiple build workflows depending on your environment:
+
+### Standard Build (Auto-Fetching or System Packages)
+The default build automatically resolves `CLI11` and `yaml-cpp` via system libraries or CMake `FetchContent`:
 
 ```bash
 # Clone the repository
 git clone https://github.com/zkalves/condor.git
 cd condor
 
-# Build in Release mode (offline flow, zero network)
-make build-offline
+# Build in Release mode (uses local third_party if present, otherwise system or FetchContent)
+make build
 
 # Run verification test suite
 make test-verbose
@@ -207,6 +212,17 @@ sudo make install
 make install PREFIX=$HOME/.local
 ```
 
+### Air-Gapped Offline Build (Zero Network Access)
+For restricted HPC/EDA compute clusters or air-gapped workstations where compile nodes have no internet access:
+
+```bash
+# 1. On an internet-connected staging machine, populate third_party/
+make download-deps
+
+# 2. Transfer the tree to the air-gapped machine and compile with zero network requests
+make build-offline
+```
+
 To remove installed files later:
 ```bash
 sudo make uninstall
@@ -216,12 +232,18 @@ sudo make uninstall
 
 ## 4. Running Your First Pipeline
 
-### Step 1: Validate the Pipeline Plan (`--dry-run`)
+@note **PATH Requirement**: `condor` must be available in your system `PATH`.
+- If installed system-wide (`sudo make install`), `condor` is located in `/usr/local/bin` (already in standard `PATH`).
+- If installed to a custom prefix (e.g. `make install PREFIX=$HOME/.local`), ensure `$HOME/.local/bin` is exported in your `PATH`: `export PATH="$HOME/.local/bin:$PATH"`
+- If running directly from source build without installing, add the build directory to your `PATH`: `export PATH="$PWD/build:$PATH"`
+All commands below invoke `condor` directly from the `PATH`.
+
+### Step 1: Validate the Pipeline Plan (--dry-run)
 
 Use the `--dry-run` flag to validate stage names, verify DAG dependencies, evaluate conditions, and inspect the scheduled jobs plan without spawning any processes:
 
 ```bash
-./build/condor examples/simple/scripts/pipeline.yaml --dry-run
+condor examples/simple/scripts/pipeline.yaml --dry-run
 ```
 
 Expected output:
@@ -251,7 +273,7 @@ Stages & Jobs Plan:
 Run the pipeline using the default local execution backend:
 
 ```bash
-./build/condor examples/simple/scripts/pipeline.yaml
+condor examples/simple/scripts/pipeline.yaml
 ```
 
 During execution, Condor displays a real-time responsive ANSI progress display showing the overall DAG progression, per-stage progress tracks, active running jobs, PIDs, and elapsed runtimes:
@@ -287,4 +309,4 @@ xdg-open ./condor_runs/latest/report.html
 - Consult the [Supported Operating Systems & Compatibility Matrix Guide](@ref supported_os) for enterprise packaging and container deployment.
 - Explore the [CLI Reference](@ref cli_reference) for all command-line options and execution modifiers.
 - Learn how to author custom workflows in the [Pipeline YAML Specification](@ref pipeline_spec).
-- Browse the [Examples Catalog](@ref examples_catalog) for hardware verification (Verilator), matrix sweeps, and Slurm/SGE grid backends.
+- Browse the [Examples Catalog](@ref examples_catalog) for EDA hardware verification, matrix sweeps, and distributed grid backends.

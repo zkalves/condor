@@ -82,12 +82,20 @@ std::string LocalBackend::generate_runner_script(const JobExecutionContext& ctx)
         ss << "# --- Pre-Hook ---\n"
            << "echo \"[CONDOR RUNNER] Executing pre-hook:\"\n"
            << "echo \"  " << ctx.pre_hook << "\"\n"
+           << "(\n"
+           << "  set -e\n"
            << ctx.pre_hook << "\n"
+           << ") > pre_hook.log 2>&1\n"
            << "PRE_STATUS=$?\n"
-           << "if [ $PRE_STATUS -ne 0 ]; then\n"
-           << "    echo \"[CONDOR RUNNER] Pre-hook failed with exit code $PRE_STATUS\" >&2\n"
-           << "    exit $PRE_STATUS\n"
-           << "fi\n\n";
+           << "cat pre_hook.log\n"
+           << "if [ $PRE_STATUS -ne 0 ]; then\n";
+        if (ctx.hook_allow_failure) {
+            ss << "    echo \"[CONDOR RUNNER] Pre-hook failed with exit code $PRE_STATUS (allow_failure=true; continuing)\" >&2\n";
+        } else {
+            ss << "    echo \"[CONDOR RUNNER] Pre-hook failed with exit code $PRE_STATUS\" >&2\n"
+               << "    exit $PRE_STATUS\n";
+        }
+        ss << "fi\n\n";
     }
 
     ss << "# --- Main Command ---\n"
@@ -99,22 +107,36 @@ std::string LocalBackend::generate_runner_script(const JobExecutionContext& ctx)
 
     if (!ctx.post_hook.empty()) {
         ss << "# --- Post-Hook ---\n";
+        auto emit_post_body = [&]() {
+            ss << "(\n"
+               << "  set -e\n"
+               << ctx.post_hook << "\n"
+               << ") > post_hook.log 2>&1\n"
+               << "POST_STATUS=$?\n"
+               << "cat post_hook.log\n"
+               << "if [ $POST_STATUS -ne 0 ]; then\n";
+            if (!ctx.hook_allow_failure) {
+                ss << "    echo \"[CONDOR RUNNER] Post-hook failed with exit code $POST_STATUS\" >&2\n"
+                   << "    if [ $CMD_STATUS -eq 0 ]; then\n"
+                   << "        CMD_STATUS=$POST_STATUS\n"
+                   << "    fi\n";
+            } else {
+                ss << "    echo \"[CONDOR RUNNER] Post-hook failed with exit code $POST_STATUS (allow_failure=true; ignored)\" >&2\n";
+            }
+            ss << "fi\n";
+        };
+
         if (ctx.post_always) {
             ss << "echo \"[CONDOR RUNNER] Executing post-hook (always):\"\n"
-               << "echo \"  " << ctx.post_hook << "\"\n"
-               << ctx.post_hook << "\n"
-               << "POST_STATUS=$?\n"
-               << "if [ $CMD_STATUS -eq 0 ]; then\n"
-               << "    CMD_STATUS=$POST_STATUS\n"
-               << "fi\n\n";
+               << "echo \"  " << ctx.post_hook << "\"\n";
+            emit_post_body();
+            ss << "\n";
         } else {
             ss << "if [ $CMD_STATUS -eq 0 ]; then\n"
                << "    echo \"[CONDOR RUNNER] Executing post-hook:\"\n"
-               << "    echo \"  " << ctx.post_hook << "\"\n"
-               << "    " << ctx.post_hook << "\n"
-               << "    POST_STATUS=$?\n"
-               << "    CMD_STATUS=$POST_STATUS\n"
-               << "fi\n\n";
+               << "    echo \"  " << ctx.post_hook << "\"\n";
+            emit_post_body();
+            ss << "fi\n\n";
         }
     }
 

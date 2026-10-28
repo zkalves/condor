@@ -69,9 +69,12 @@ struct BackendConfig {
  * @brief Lifecycle pre- and post-execution hooks configured at the global, stage, or job level.
  */
 struct HookConfig {
-    std::string pre;      ///< Command executed before the stage or job starts.
-    std::string post;     ///< Command executed after the stage or job finishes.
-    bool always{false};   ///< If true, post hook executes even if the stage or job failed.
+    std::string pre;                           ///< Command or script executed before the stage or job starts.
+    std::string post;                          ///< Command or script executed after the stage or job finishes.
+    std::vector<std::string> pre_commands;     ///< List of individual pre-hook commands.
+    std::vector<std::string> post_commands;    ///< List of individual post-hook commands.
+    bool always{false};                        ///< If true, post hook executes even if the stage or job failed.
+    bool allow_failure{false};                 ///< If true, non-zero return code from hook does not fail stage or job.
 };
 
 /**
@@ -80,10 +83,17 @@ struct HookConfig {
  */
 struct JobDefaults {
     std::string command;                                     ///< Default command line to execute if unspecified in job.
-    std::string backend;                                     ///< Default execution backend identifier.
     std::string args;                                        ///< Default extra arguments appended to command.
     HookConfig hooks;                                        ///< Default lifecycle hooks.
     std::unordered_map<std::string, std::string> variables;  ///< Default variables scoped to this hierarchy level.
+};
+
+/**
+ * @struct StageDefaults
+ * @brief Baseline default properties inherited by stages across the pipeline.
+ */
+struct StageDefaults {
+    HookConfig hooks;                                        ///< Default lifecycle hooks applied across all stages.
 };
 
 /**
@@ -95,7 +105,6 @@ struct JobConfig {
     std::string name;                                       ///< Descriptive human-readable job name.
     std::string command;                                    ///< Shell command to execute.
     std::string stage_name;                                 ///< Parent stage containing this job.
-    std::string backend;                                    ///< Optional backend override for this specific job.
     std::string enabled_if;                                 ///< Conditional evaluation expression (e.g. "${coverage} == 1").
     bool allow_failure{false};                              ///< If true, non-zero exit code does not trigger failure policies.
     std::vector<std::string> depends_on;                    ///< List of prerequisite job IDs or stage names.
@@ -112,7 +121,6 @@ struct JobConfig {
  */
 struct StageConfig {
     std::string name;                     ///< Unique alphanumeric stage identifier.
-    std::string backend;                  ///< Stage-level backend override.
     std::string enabled_if;               ///< Stage-level conditional evaluation expression.
     bool allow_failure{false};             ///< If true, stage failure does not abort the entire pipeline.
     std::vector<std::string> depends_on;  ///< Prerequisite stage names that must pass before this stage starts.
@@ -133,7 +141,8 @@ struct PipelineSettings {
     FailureAction on_failure_action{FailureAction::ABORT}; ///< Failure policy: abort, continue, or stage_barrier.
     bool exit_zero_on_failure{false};                     ///< If true, condor process exits with 0 even if jobs failed.
     int status_interval_sec{30};                          ///< Periodic status dump interval for CI / non-interactive mode.
-    std::string default_backend{"local"};                 ///< Global default backend for jobs without explicit backend.
+    std::string backend{"local"};                         ///< Pipeline execution backend configured under settings.
+    std::string default_backend{"local"};                 ///< Backwards-compatible alias for settings backend.
     bool dry_run{false};                                  ///< If true, validate pipeline and print plan without executing.
     bool no_interactive{false};                           ///< If true, disable raw terminal escape codes and interactive menu.
     bool verbose_logging{false};                          ///< If true, print verbose debug logs.
@@ -152,6 +161,7 @@ struct PipelineConfig {
     VariableManager variables;                               ///< Global variable manager.
     PipelineSettings settings;                               ///< Runtime execution settings.
     JobDefaults defaults;                                    ///< Global job defaults applied across all stages.
+    StageDefaults stage_defaults;                            ///< Global stage defaults applied across all stages.
     std::unordered_map<std::string, BackendConfig> backends; ///< Registered backend configurations.
     HookConfig hooks;                                        ///< Pipeline-level global hooks.
     std::vector<StageConfig> stages;                         ///< List of stages in the DAG.

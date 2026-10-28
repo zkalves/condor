@@ -4,7 +4,7 @@
 
 # Condor Documentation Portal
 
-Welcome to the **Condor** documentation portal. **Condor** is a modern, high-performance parallel process and grid orchestrator built with Modern C++ (C++20). Engineered with an offline-first philosophy and zero external runtime dependencies, Condor executes directed acyclic graph (DAG) pipelines across local multicore CPUs and distributed grid clusters (Slurm, SGE, LSF) with strict process isolation, signal propagation control, real-time terminal progress monitoring, and interactive HTML reporting.
+Welcome to the **Condor** documentation portal. **Condor** (**Con**current + **D**ependency + **Or**chestrator) is a modern, high-performance parallel process and grid orchestrator built with Modern C++ (C++20). Engineered with an offline-first philosophy and zero external runtime dependencies, Condor executes directed acyclic graph (DAG) pipelines across local multicore CPUs and distributed grid clusters (Slurm, Grid Engine Family, IBM Spectrum LSF, PBS/TORQUE, Apache Spark) with strict process isolation, signal propagation control, real-time terminal progress monitoring, and interactive HTML reporting.
 
 ---
 
@@ -45,7 +45,7 @@ docs/
 
 - **Offline-First Zero Runtime Dependencies**: Pure C++20 relying exclusively on standard POSIX system calls (`fork`, `execvp`, `waitpid`, `setpgid`, `kill`) and the standard C++ library. No Python, Node.js, or heavyweight runtime frameworks needed.
 - **Strict Process Group & Working Directory Isolation**: Every individual job executes in a completely isolated folder (`<run_dir>/<stage>/<job_id>/`) within its own dedicated POSIX process group (`setpgid`), ensuring runaway processes are terminated cleanly without orphan leaks.
-- **Configurable Relative & Absolute Paths**: Support for either absolute host paths or portable relative run paths (`CONDOR_JOB_DIR=.`, `CONDOR_RUN_DIR=../..`, `BUILD_DIR=../../build/0001`), allowing run folders to be archived, relocated, or reproduced offline.
+- **Configurable Relative & Absolute Paths**: Support for either absolute host paths or portable relative run paths (`CONDOR_JOB_DIR=.`, `CONDOR_RUN_DIR=../..`, `BUILD_DIR=../../build_stage/0001`), allowing run folders to be archived, relocated, or reproduced offline.
 - **Dynamic Terminal Width & Responsive Progress**: Real-time multi-bar ANSI progress visualizer with dynamic terminal width detection (`TIOCGWINSZ`), status summaries, and interactive keyboard menu (`p` pause, `r` resume, `k` kill, `q` quit).
 - **Self-Contained Interactive HTML Report**: Automatically generates an embedded, offline-ready `report.html` with per-stage tabbed navigation, stage progression bars, custom machine metrics parsing, embedded log inspectors, search, and deep-linking.
 - **Extensible Distributed Grid Backends**: Dynamic, non-hardcoded grid execution system with parameterized command templates (`{script}`, `{grid_id}`, `{job_dir}`) and out-of-the-box definitions for Slurm (`sbatch`), Grid Engine Family (Sun Grid Engine / Altair / Open Grid Scheduler), IBM Spectrum LSF (`bsub`), PBS Professional & TORQUE (`qsub`), and Apache Spark (`spark-submit`). Discover all backends via `condor --list-backends`.
@@ -54,21 +54,24 @@ docs/
 
 ## ⚡ Quick Start
 
+@note Ensure `condor` is in your `PATH` (e.g. via `sudo make install` or by adding the installation directory to your `PATH`). All Condor commands should be executed directly via `condor`.
+
 ```bash
-# 1. Build Condor (offline flow, zero network required)
-make build-offline
+# 1. Build and install Condor
+make build
+sudo make install
 
 # 2. Run all automated unit test suites
 make test-verbose
 
 # 3. Validate pipeline configuration without executing
-./build/condor examples/simple/scripts/pipeline.yaml --dry-run
+condor examples/simple/scripts/pipeline.yaml --dry-run
 
 # 4. Execute the pipeline
-./build/condor examples/simple/scripts/pipeline.yaml
+condor examples/simple/scripts/pipeline.yaml
 
 # 5. Run with summary terminal output and portable relative paths
-./build/condor examples/verilator/scripts/pipeline.yaml --relative-paths --output-mode=summary
+condor examples/conditional/scripts/pipeline.yaml --relative-paths --output-mode=summary
 ```
 
 ---

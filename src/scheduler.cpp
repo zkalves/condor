@@ -30,6 +30,8 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
+#include <cstring>
 
 namespace condor {
 
@@ -89,14 +91,12 @@ void Scheduler::init_runtime_states() {
             JobRuntimeState job_state;
             job_state.config = job_cfg;
 
-            // Determine backend
-            std::string bname = config_.settings.default_backend;
-            if (!config_.settings.backend_override.empty()) {
-                bname = config_.settings.backend_override;
-            } else if (!job_cfg.backend.empty()) {
-                bname = job_cfg.backend;
-            } else if (!stage_cfg.backend.empty()) {
-                bname = stage_cfg.backend;
+            // Determine backend (configured at settings.backend or overridden via CLI)
+            std::string bname = !config_.settings.backend_override.empty()
+                                ? config_.settings.backend_override
+                                : (!config_.settings.backend.empty() ? config_.settings.backend : config_.settings.default_backend);
+            if (bname.empty()) {
+                bname = "local";
             }
 
             auto bit = backends_.find(bname);
@@ -153,16 +153,16 @@ void Scheduler::sync_stage_manifest(std::string_view stage_name) {
     workspace_.update_stage_manifest(stage_name, entries);
 }
 
-void Scheduler::execute_hook(const HookConfig& hook, bool is_pre,
+int Scheduler::execute_hook(const HookConfig& hook, bool is_pre,
                             std::string_view stage_name,
                             std::string_view job_id,
                             int last_exit_code) {
     const std::string& script = is_pre ? hook.pre : hook.post;
-    if (script.empty()) return;
+    if (script.empty()) return 0;
 
     if (!is_pre && last_exit_code != 0 && !hook.always) {
         CONDOR_LOG_DEBUG("Skipping post hook because previous command failed and always=false");
-        return;
+        return 0;
     }
 
     auto hook_vars = config_.variables;
@@ -223,8 +223,36 @@ void Scheduler::execute_hook(const HookConfig& hook, bool is_pre,
     std::string interpolated = hook_vars.interpolate(script);
     CONDOR_LOG_DEBUG("Executing hook: " + interpolated);
 
+    std::filesystem::path hook_dir;
+    if (!job_id.empty() && !stage_name.empty()) {
+        hook_dir = workspace_.job_dir(stage_name, job_id);
+    } else if (!stage_name.empty()) {
+        hook_dir = workspace_.stage_dir(stage_name);
+    } else {
+        hook_dir = workspace_.run_dir();
+    }
+    std::error_code dir_ec;
+    std::filesystem::create_directories(hook_dir, dir_ec);
+    std::filesystem::path log_path = hook_dir / (is_pre ? "pre_hook.log" : "post_hook.log");
+
     pid_t pid = fork();
+    if (pid < 0) {
+        CONDOR_LOG_ERROR("fork() failed for hook: " + std::string(std::strerror(errno)));
+        return -1;
+    }
+
     if (pid == 0) {
+        if (chdir(hook_dir.c_str()) != 0) {
+            // best effort
+        }
+
+        int log_fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (log_fd >= 0) {
+            dup2(log_fd, STDOUT_FILENO);
+            dup2(log_fd, STDERR_FILENO);
+            close(log_fd);
+        }
+
         setenv("CONDOR_RUN_DIR", run_dir_val.c_str(), 1);
         setenv("CONDOR_STAGE_NAME", std::string(stage_name).c_str(), 1);
         setenv("CONDOR_JOB_ID", std::string(job_id).c_str(), 1);
@@ -250,16 +278,22 @@ void Scheduler::execute_hook(const HookConfig& hook, bool is_pre,
 
         char* const argv[] = {
             const_cast<char*>("bash"),
+            const_cast<char*>("-e"),
             const_cast<char*>("-c"),
             const_cast<char*>(interpolated.c_str()),
             nullptr
         };
         execvp("bash", argv);
         _exit(127);
-    } else if (pid > 0) {
-        int status = 0;
-        waitpid(pid, &status, 0);
     }
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+    int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1);
+    if (exit_code != 0) {
+        CONDOR_LOG_DEBUG("Hook finished with exit code " + std::to_string(exit_code));
+    }
+    return exit_code;
 }
 
 bool Scheduler::is_stage_ready(const StageRuntimeState& stage) const {
@@ -357,7 +391,25 @@ void Scheduler::dispatch_ready_jobs() {
             }
             // Stage is starting
             stage.status = JobStatus::RUNNING;
-            execute_hook(stage.config.hooks, true, stage.config.name);
+            int pre_rc = execute_hook(stage.config.hooks, true, stage.config.name);
+            if (pre_rc != 0 && !stage.config.hooks.allow_failure) {
+                CONDOR_LOG_ERROR("Stage '" + stage.config.name + "' pre-hook failed with exit code " + std::to_string(pre_rc));
+                stage.status = JobStatus::FAILED;
+                for (const auto& jid : stage.job_ids) {
+                    jobs_[jid].status = JobStatus::SKIPPED;
+                }
+                sync_stage_manifest(stage.config.name);
+
+                if (!stage.config.allow_failure) {
+                    if (config_.settings.on_failure_action == FailureAction::ABORT) {
+                        aborted_ = true;
+                        return;
+                    } else if (config_.settings.on_failure_action == FailureAction::STAGE_BARRIER) {
+                        stage_barrier_triggered_ = true;
+                    }
+                }
+                continue;
+            }
         }
 
         if (stage.status != JobStatus::RUNNING) continue;
@@ -454,6 +506,7 @@ void Scheduler::dispatch_ready_jobs() {
                 ctx->pre_hook = job_vars.interpolate(job.config.hooks.pre);
                 ctx->post_hook = job_vars.interpolate(job.config.hooks.post);
                 ctx->post_always = job.config.hooks.always;
+                ctx->hook_allow_failure = job.config.hooks.allow_failure;
                 ctx->env_vars = job_vars.get_env_pairs();
                 for (const auto& [k, v] : job.config.variables) {
                     ctx->env_vars.emplace_back(VariableManager::to_env_key(k), v);
@@ -549,7 +602,11 @@ void Scheduler::poll_running_jobs() {
             }
             if (all_done) {
                 stage.status = any_failed ? JobStatus::FAILED : JobStatus::PASSED;
-                execute_hook(stage.config.hooks, false, stage.config.name, "", any_failed ? 1 : 0);
+                int post_rc = execute_hook(stage.config.hooks, false, stage.config.name, "", any_failed ? 1 : 0);
+                if (post_rc != 0 && !stage.config.hooks.allow_failure) {
+                    CONDOR_LOG_ERROR("Stage '" + stage.config.name + "' post-hook failed with exit code " + std::to_string(post_rc));
+                    stage.status = JobStatus::FAILED;
+                }
             }
         }
     }
@@ -723,7 +780,11 @@ bool Scheduler::run() {
     RuntimeMenu::init_signal_handlers(this);
 
     // Global Pre-hook
-    execute_hook(config_.hooks, true);
+    int global_pre_rc = execute_hook(config_.hooks, true);
+    if (global_pre_rc != 0 && !config_.hooks.allow_failure) {
+        CONDOR_LOG_ERROR("Global pipeline pre-hook failed with exit code " + std::to_string(global_pre_rc));
+        return false;
+    }
 
     while (true) {
         if (RuntimeMenu::is_hard_kill_triggered()) {
@@ -766,12 +827,16 @@ bool Scheduler::run() {
     auto final_stats = compute_progress_stats();
     bool pipeline_success = (final_stats.failed_jobs == 0 && !aborted_);
 
-    // Generate tool-agnostic HTML report
+    // Global Post-hook
+    int global_post_rc = execute_hook(config_.hooks, false, "", "", pipeline_success ? 0 : 1);
+    if (global_post_rc != 0 && !config_.hooks.allow_failure) {
+        CONDOR_LOG_ERROR("Global pipeline post-hook failed with exit code " + std::to_string(global_post_rc));
+        pipeline_success = false;
+    }
+
+    // Generate tool-agnostic HTML report (includes all stage and job hook logs)
     std::filesystem::path report_html_path = workspace_.run_dir() / "report.html";
     HtmlReportGenerator::write_report(report_html_path, config_, workspace_, stages_, jobs_, final_stats, pipeline_success);
-
-    // Global Post-hook
-    execute_hook(config_.hooks, false, "", "", pipeline_success ? 0 : 1);
 
     progress_->print_final_summary(final_stats, pipeline_success, report_html_path.string());
 

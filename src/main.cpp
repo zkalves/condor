@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    CLI::App app{"condor - Modern C++20 Parallel Process and Grid Orchestrator"};
+    CLI::App app{"condor (Concurrent + Dependency + Orchestrator) - Modern C++20 Parallel Process and Grid Orchestrator"};
 
     std::string pipeline_config_path;
     std::string stage_name;
@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
     app.add_option("--max-parallel-jobs", max_parallel_jobs, "Maximum concurrent local jobs (default: hardware concurrency)");
     app.add_option("--base-output-dir", base_output_dir, "Base folder for timestamped runs (default: ./condor_runs)");
     app.add_option("--run-dir", run_dir, "Run inside explicit fixed directory instead of generating timestamped directory");
-    app.add_option("--backend-override", backend_override, "Override default execution backend");
+    app.add_option("-b,--backend,--backend-override", backend_override, "Execution backend for pipeline (default: local or configured in YAML)");
     app.add_option("--on-failure-action", on_failure_action_str, "Override failure policy (abort, continue, stage_barrier)");
     app.add_flag("--exit-zero-on-failure", exit_zero_on_failure, "Force return code 0 even if jobs or stages fail");
     app.add_option("--status-interval-sec", status_interval_sec, "Interval in seconds to dump status summaries in CI mode (default: 30)");
@@ -267,7 +267,8 @@ int main(int argc, char** argv) {
                 std::string interp_cmd = config.variables.interpolate(job.command);
                 std::string bname = !config.settings.backend_override.empty()
                                     ? config.settings.backend_override
-                                    : (!job.backend.empty() ? job.backend : (!stage.backend.empty() ? stage.backend : config.settings.default_backend));
+                                    : (!config.settings.backend.empty() ? config.settings.backend : config.settings.default_backend);
+                if (bname.empty()) bname = "local";
 
                 std::string job_path_str = (config.settings.path_style == PathStyle::RELATIVE)
                                             ? stage.name + "/" + job.job_id + "/"

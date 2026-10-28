@@ -15,7 +15,7 @@ variables:
 settings:
   max_parallel_jobs: 4
   base_output_dir: "./condor_runs"
-  default_backend: "local"
+  backend: "grid_cluster"
 
 # Define custom template backends (e.g. Slurm, SGE, LSF, or container orchestrators)
 backends:
@@ -34,10 +34,9 @@ stages:
       - name: stage_inputs
         command: "echo '[LOCAL] Staging input data matrices...'"
 
-  # Stage 2 assigns grid_cluster backend at the stage level
+  # Stage 2 executes on the configured grid_cluster backend
   - name: distributed_compute
     depends_on: [prepare]
-    backend: grid_cluster
     defaults:
       command: "bash ${CONDOR_PIPELINE_DIR}/workload.sh"
     jobs:
@@ -45,10 +44,8 @@ stages:
         depends_on: ["prepare/0002"]       # Job-level dependency on stage_inputs
       - name: matrix_partition_1
         depends_on: ["prepare/0002"]
-      # Job-level backend override: run this specific job locally
-      - name: local_sanity_probe
-        backend: local
-        command: "echo '[LOCAL OVERRIDE] Performing fast sanity check on local worker slot...'"
+      - name: sanity_probe
+        command: "echo '[GRID] Performing sanity check on cluster worker slot...'"
 
   # Stage 3 aggregates results locally
   - name: finalize

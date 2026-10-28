@@ -1,6 +1,6 @@
 # Condor
 
-A modern C++20 parallel process and grid orchestrator designed for high-performance pipelines, simulation harnesses, and build/test workflows.
+> **Condor** (**Con**current + **D**ependency + **Or**chestrator) is a modern C++20 parallel process and grid orchestrator designed for high-performance pipelines, simulation harnesses, and build/test workflows.
 
 ---
 
@@ -143,9 +143,9 @@ cmake --build build -j$(nproc)
 
 ### Run Tests
 ```bash
+make test-verbose
+# Or run via CTest:
 ctest --test-dir build --output-on-failure
-# Or run test binary directly:
-./build/condor_tests
 ```
 
 ---

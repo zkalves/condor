@@ -2,6 +2,11 @@
 
 This document provides a detailed technical overview of Condor's execution model, DAG scheduling mechanics, POSIX process group isolation, and filesystem architecture.
 
+> **Name Origin**: **Condor** represents the synergy of three foundational architectural pillars:
+> - **Con**current &mdash; High-throughput POSIX process parallelism and asynchronous distributed grid execution.
+> - **D**ependency &mdash; Graph-based directed acyclic graph (DAG) topological scheduling with dynamic cycle detection.
+> - **Or**chestrator &mdash; Resilient pipeline orchestration with unified defaults, lifecycle hooks, failure recovery, and zero external runtime dependencies.
+
 ---
 
 ## 1. High-Level Architecture
@@ -84,7 +89,7 @@ sequenceDiagram
 
 ---
 
-## 4. Standalone Runner Script (`job_runner.sh`)
+## 4. Standalone Runner Script (job_runner.sh)
 
 Rather than executing opaque shell strings or dynamic string `eval`, Condor writes a self-contained, POSIX-compliant runner script inside every job folder prior to execution:
 
@@ -121,7 +126,7 @@ This architecture ensures that any verification failure can be reproduced instan
 
 ---
 
-## 5. Artifact Hand-offs (`${BUILD_DIR}` and `${TEST_DIR}`)
+## 5. Artifact Hand-offs (${BUILD_DIR} and ${TEST_DIR})
 
 Condor automates artifact passing between compilation and testing stages:
 - **Build Stage Discovery**: When a stage depends on a build stage (any stage containing `"build"` in its name or the first declared dependency), the scheduler discovers the build job directory and injects its path as `${BUILD_DIR}` and `${CONDOR_BUILD_DIR}` into dependent test jobs.

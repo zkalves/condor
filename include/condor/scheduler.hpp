@@ -138,10 +138,10 @@ private:
     void poll_running_jobs();
     bool is_stage_ready(const StageRuntimeState& stage) const;
     bool is_job_ready(const JobRuntimeState& job) const;
-    void execute_hook(const HookConfig& hook, bool is_pre,
-                      std::string_view stage_name = "",
-                      std::string_view job_id = "",
-                      int last_exit_code = 0);
+    int execute_hook(const HookConfig& hook, bool is_pre,
+                     std::string_view stage_name = "",
+                     std::string_view job_id = "",
+                     int last_exit_code = 0);
 
     ProgressStats compute_progress_stats() const;
     std::vector<StageSummaryInfo> compute_stage_summaries() const;
