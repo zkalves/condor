@@ -139,6 +139,7 @@ target_link_libraries(condor_core PUBLIC
 
 # Condor Main Executable
 add_executable(condor src/main.cpp)
+target_compile_definitions(condor PRIVATE CONDOR_VERSION="${PROJECT_VERSION}")
 target_link_libraries(condor PRIVATE condor_core)
 
 # Tests
