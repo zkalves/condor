@@ -250,7 +250,7 @@ For the complete reference of all YAML configuration options, see the [Pipeline 
 
 ---
 
-## Interactive HTML Execution Report (`report.html`)
+## Interactive HTML Execution Report (report.html)
 
 For every pipeline run, Condor automatically compiles a zero-dependency, self-contained interactive HTML report in `<run_dir>/report.html`:
 

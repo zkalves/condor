@@ -101,7 +101,7 @@ Condor's metric parser utilizes a streaming, zero-dependency line scanner design
 | **Value Types** | Numbers, Strings, Units | Supports numbers (`100000`, `98.4`), percentages (`98.4%`), durations (`14.2s`), memory sizes (`256MB`), statuses (`PASSED`), or file paths (`cov_report/index.html`). |
 | **Ignored Lines** | Blank lines, pure comments | Empty lines, lines with only whitespace, or comments without a colon (`:`) are safely skipped. Lines with empty keys or values are omitted. |
 
-#### Example Metric File (`test_metrics.yaml`)
+#### Example Metric File (test_metrics.yaml)
 ```yaml
 # test_metrics.yaml - Emitted by simulation or benchmark job
 test_name: "test_alu_directed"
@@ -118,7 +118,7 @@ peak_memory_mb: 184
 report_url: "cov_report/index.html"
 ```
 
-#### Visualization in `report.html`
+#### Visualization in report.html
 When extracted, Condor renders these metrics directly in the job card:
 - **Card Placement**: Located immediately below the command and job directory paths in a dedicated **Custom Machine Metrics** section.
 - **Badge Styling**: Each key-value pair is formatted inside a responsive flex grid (`.metrics-grid`), rendering key names with distinct muted styling (`.metric-key`) and values highlighted in high-contrast cyan/accent badges (`.metric-val`).

@@ -643,7 +643,11 @@ hr {
 /* ==========================================================================
    10. Code Blocks & Syntax Highlighting
    ========================================================================== */
-code, tt {
+code, tt,
+.textblock code, .textblock tt,
+p code, p tt,
+li code, li tt,
+td code, td tt {
     font-family: var(--font-monospace) !important;
     font-size: 0.88em;
     background-color: var(--code-background) !important;
@@ -651,6 +655,32 @@ code, tt {
     padding: 2px 6px;
     border-radius: 4px;
     border: 1px solid var(--code-border) !important;
+    white-space: break-spaces;
+}
+
+pre code, div.fragment code,
+pre tt, div.fragment tt {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    color: inherit !important;
+    border-radius: 0 !important;
+    white-space: inherit;
+}
+
+a > code, a > tt {
+    color: var(--sol-blue) !important;
+}
+
+a:hover > code, a:hover > tt {
+    color: var(--sol-cyan) !important;
+}
+
+h1 code, h2 code, h3 code, h4 code, h5 code, h6 code,
+h1 tt, h2 tt, h3 tt, h4 tt, h5 tt, h6 tt {
+    font-size: 0.85em;
+    padding: 2px 6px;
+    vertical-align: baseline;
 }
 
 pre, div.fragment {

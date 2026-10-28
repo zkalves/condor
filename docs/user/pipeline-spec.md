@@ -214,7 +214,7 @@ Every property in the Condor pipeline specification falls into one of four disti
 
 The following 3 properties natively accept **either** a single argument or a list (in both block bullet `- ` style and inline flow `[...]` style):
 
-#### A. `include` (Root, Stage, and Job levels)
+#### A. include (Root, Stage, and Job levels)
 Use a single string to include one file, or a list to include multiple files:
 
 ```yaml
@@ -231,7 +231,7 @@ include:
 include: ["variables.yaml", "backends.yaml", "common_stages.yaml"]
 ```
 
-#### B. `depends_on` (Stage and Job levels)
+#### B. depends_on (Stage and Job levels)
 Use a single string to depend on one stage/job, or a list to declare multiple prerequisites:
 
 ```yaml
@@ -263,7 +263,7 @@ jobs:
     # Or inline: depends_on: ["0001", "setup_stage/0002"]
 ```
 
-#### C. `pre` and `post` Lifecycle Hooks
+#### C. pre and post Lifecycle Hooks
 Use a single string command, or a list of shell commands executed sequentially:
 
 ```yaml
@@ -279,26 +279,6 @@ hooks:
 
   # 3. Sequence in inline flow style:
   # pre: ["mkdir -p build", "cd build && cmake .."]
-```
-
-#### D. `seeds` (Job level)
-Use a single integer for a single run seed, or a list of integers to trigger a parameter sweep:
-
-```yaml
-# 1. Single seed argument:
-jobs:
-  - name: test_monte_carlo
-    seeds: 42   # Or use singular: seed: 42
-
-# 2. Multi-seed parameter sweep (generates test_sim_seed_100, test_sim_seed_200, test_sim_seed_300):
-jobs:
-  - name: test_sim
-    seeds:
-      - 100
-      - 200
-      - 300
-    # Or inline flow style:
-    # seeds: [100, 200, 300]
 ```
 
 ---
@@ -370,7 +350,7 @@ All other properties accept **strictly a single scalar value** (string, integer,
 
 ---
 
-### 2. Execution Settings (`settings:`)
+### 2. Execution Settings (settings:)
 
 | Key | Type | Default | Allowed Values | Description | CLI Equivalent |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -386,10 +366,11 @@ All other properties accept **strictly a single scalar value** (string, integer,
 | `dry_run` | boolean | `false` | `true`, `false` | If `true`, validates syntax, DAG dependencies, prints the execution plan, and exits without running jobs. | `--dry-run` |
 | `no_interactive` | boolean | `false` | `true`, `false` | Disables raw ANSI terminal redraws and interactive menu polling for headless CI/CD runners. | `--no-interactive` |
 | `verbose_logging`| boolean | `false` | `true`, `false` | Enables detailed internal scheduler state machine transitions and debugging logs. | `--verbose-logging` |
+| `count_multiplier`| integer | `1` | `1..N` | Global multiplier for scalable job counts. | `--count-multiplier <N>` |
 
 ---
 
-### 3. Stage Definition (`stages:[]`)
+### 3. Stage Definition (stages:[])
 
 | Key | Type | Required | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -397,35 +378,34 @@ All other properties accept **strictly a single scalar value** (string, integer,
 | `enabled_if` | string | Optional | `""` | Conditional evaluation expression (e.g. `"${coverage} == '1'"`). If false, stage is skipped. |
 | `allow_failure`| boolean | Optional | `false` | If `true`, failures in this stage do not fail the overall pipeline or trigger abort policies. |
 | `depends_on` | string or sequence of strings | Optional | `[]` | List of prerequisite stage names that must pass or be skipped before this stage starts. |
+| `defaults` | map | Optional | `{}` | Stage-level job defaults (`command`, `args`, `append_args`, `scalable`, `variables`, `hooks`). |
 | `hooks` | map | Optional | `{}` | Stage-level lifecycle hooks (`pre`, `post`, `always`, `allow_failure`). |
 | `include` | string or sequence of strings | Optional | `[]` | External YAML file(s) containing job definitions to execute in this stage. |
 | `jobs` | sequence of jobs | Optional | `[]` | Sequence of job definitions configured directly in this stage. |
 
 ---
 
-### 4. Job Definition (`jobs:[]`)
+### 4. Job Definition (jobs:[])
 
 | Key | Type | Required | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `name` | string | Optional | `"job_<id>"` | Descriptive human-readable job name. Used as `${CONDOR_JOB_NAME}` and `${TEST_NAME}`. |
-| `command` | string | Optional | Inherited | Shell command line executed by worker slots. Inherited from global `defaults.job.command`. |
+| `command` | string | Optional | Inherited | Shell command line executed by worker slots. Inherited from global or stage defaults. |
 | `args` | string | Optional | Inherited | Arguments appended to the command line or exposed as `${ARGS}`. |
+| `append_args` | boolean | Optional | Inherited | If `true`, appends `args` to parent arguments rather than overriding. |
+| `scalable` | boolean | Optional | `true` | If `true`, count scales with CLI `--count-multiplier`. If `false`, count is pinned. |
 | `enabled_if` | string | Optional | `""` | Job-level conditional expression. If false, job is marked `SKIPPED`. |
 | `allow_failure`| boolean | Optional | `false` | If `true`, non-zero return code is marked `FAILED_ALLOWED` and does not trigger abort policies. |
 | `depends_on` | string or sequence of strings | Optional | `[]` | Dependency references: Intra-stage job ID (`"0001"`), cross-stage key (`"stage/0002"`), or stage name. |
 | `hooks` | map | Optional | Inherited | Job-level lifecycle hooks wrapping the primary command (`pre`, `post`, `always`, `allow_failure`). |
 | `variables` | map | Optional | `{}` | Scoped variables exposed as `${KEY}` in command/hooks and exported to environment. |
 | `count` | integer | Optional | `1` | Test scaling replication count (`>= 1`). Generates `N` replicated jobs (`<name>_0`, `<name>_1`, ...). |
-| `seed` | integer | Optional | &mdash; | Explicit pseudo-random seed assigned to this job instance. Injected as `${SEED}`. |
-| `seeds` | integer or sequence of integers | Optional | `[]` | Explicit list of seeds for parameter sweeps. Generates `<name>_seed_<val>` per item. |
+| `matrix` | map | Optional | `{}` | Parameter sweep matrix across arbitrary variables (Cartesian product combinations). |
 | `include` | string or sequence of strings | Optional | `[]` | Path or list of paths to external YAML files containing jobs to expand into this position. |
-
-> [!NOTE]
-> **Mutual Exclusivity**: A job cannot declare both `count` and `seed`/`seeds`.
 
 ---
 
-### 5. Lifecycle Hooks (`HookConfig`)
+### 5. Lifecycle Hooks (HookConfig)
 
 Hooks can be configured at:
 - **Pipeline Level**: `hooks:`
@@ -443,7 +423,7 @@ Hooks can be configured at:
 
 ---
 
-### 6. Execution Backends (`backends:`)
+### 6. Execution Backends (backends:)
 
 | Key | Type | Required | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
@@ -621,7 +601,7 @@ Condor eliminates boilerplate repetition across jobs by providing a clean, 3-tie
 +-------------------------------------------------------------+
 ```
 
-### Argument Resolution & `append_args`
+### Argument Resolution & append_args
 
 By default (`append_args: false`), specifying `args:` at a more specific level completely **overrides** the arguments inherited from higher levels.
 
@@ -856,7 +836,7 @@ Hooks use a nested `hooks:` block with support for both single string commands a
 
 ---
 
-### Unified Defaults Hierarchy: `defaults.stage` vs. `defaults.job`
+### Unified Defaults Hierarchy: defaults.stage vs. defaults.job
 
 To keep the pipeline configuration clean, cohesive, and intuitive, Condor unifies all stage and job defaults under a single top-level `defaults:` block, while reserving top-level `hooks:` strictly for the whole-pipeline lifecycle:
 
@@ -1050,7 +1030,7 @@ Condor's metric parser utilizes a streaming, zero-dependency line scanner design
 | **Value Types** | Numbers, Strings, Units | Accepts integers (`100000`), floats (`98.4`), percentages (`98.4%`), units (`14.2s`, `256MB`), status codes (`PASSED`), or file paths (`cov/index.html`). |
 | **Ignored Lines** | Blank lines, pure comments | Empty lines, whitespace-only lines, or comment lines without a colon (`:`) are safely ignored. Lines where either key or value trims to empty are discarded. |
 
-#### Valid YAML Metric File Example (`test_metrics.yaml`)
+#### Valid YAML Metric File Example (test_metrics.yaml)
 
 ```yaml
 # test_metrics.yaml - Machine-readable execution metrics
@@ -1145,7 +1125,7 @@ condor --list-backends
 
 ---
 
-### Pipeline Backend Configuration (`settings.backend:`)
+### Pipeline Backend Configuration (settings.backend:)
 
 The execution backend defines where and how commands are executed and monitored across the entire workflow. Condor treats the backend strictly as a **pipeline-level configuration** specified inside `settings:`.
 
@@ -1166,7 +1146,7 @@ stages:
     jobs:
       - name: test_boot
 ```
-#### 2. Command-Line Override (`-b / --backend`)
+#### 2. Command-Line Override (-b / --backend)
 You can override the pipeline backend globally at runtime without modifying the YAML file:
 
 ```bash

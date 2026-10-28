@@ -182,11 +182,51 @@
         }
     }
 
+    function sanitizeCodeTags() {
+        // Fix headings or titles containing escaped <tt> tags
+        var headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6, .title, .summary, .memtitle');
+        for (var i = 0; i < headings.length; i++) {
+            var el = headings[i];
+            if (el.innerHTML.indexOf('&lt;tt&gt;') !== -1 || el.innerHTML.indexOf('&lt;code&gt;') !== -1) {
+                el.innerHTML = el.innerHTML
+                    .replace(/&lt;tt&gt;(.*?)&lt;\/tt&gt;/gi, '<code>$1</code>')
+                    .replace(/&lt;code&gt;(.*?)&lt;\/code&gt;/gi, '<code>$1</code>');
+            }
+        }
+
+        // Clean up navtree nodes if any contain raw or escaped <tt> tags
+        var navTree = document.getElementById('nav-tree');
+        if (navTree) {
+            var links = navTree.querySelectorAll('a');
+            for (var j = 0; j < links.length; j++) {
+                var a = links[j];
+                if (a.innerHTML.indexOf('&lt;tt&gt;') !== -1 || a.textContent.indexOf('<tt>') !== -1) {
+                    a.innerHTML = a.innerHTML
+                        .replace(/&lt;tt&gt;(.*?)&lt;\/tt&gt;/gi, '<code>$1</code>')
+                        .replace(/<tt>(.*?)<\/tt>/gi, '<code>$1</code>');
+                }
+            }
+        }
+    }
+
     // Run on initial page load
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', renderAllDiagrams);
+        document.addEventListener('DOMContentLoaded', function() {
+            sanitizeCodeTags();
+            renderAllDiagrams();
+        });
     } else {
+        sanitizeCodeTags();
         renderAllDiagrams();
+    }
+
+    // Watch for dynamic navtree expansion to sanitize any lazy-loaded nodes
+    var navTreeEl = document.getElementById('nav-tree');
+    if (navTreeEl) {
+        var navObserver = new MutationObserver(function() {
+            sanitizeCodeTags();
+        });
+        navObserver.observe(navTreeEl, { childList: true, subtree: true });
     }
 
     // Watch for dark mode changes (from Doxygen-Awesome toggle)
