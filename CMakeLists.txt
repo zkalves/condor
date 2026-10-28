@@ -156,6 +156,12 @@ add_executable(condor_tests
 )
 target_link_libraries(condor_tests PRIVATE condor_core)
 
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(condor_core PRIVATE -Werror)
+    target_compile_options(condor PRIVATE -Werror)
+    target_compile_options(condor_tests PRIVATE -Werror)
+endif()
+
 add_test(NAME AllCondorTests COMMAND condor_tests)
 
 # ==============================================================================
