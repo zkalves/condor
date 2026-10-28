@@ -1,0 +1,129 @@
+name: Verilator EDA Verification
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main, master, dev ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-verilator:
+    name: Prepare Verilator 5.052
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Cache Verilator 5.052
+        id: cache-verilator
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/verilator-5.052
+          key: verilator-5.052-${{ runner.os }}
+
+      - name: Install & Compile Verilator 5.052
+        if: steps.cache-verilator.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            git help2man perl python3 make autoconf g++ flex bison ccache \
+            libfl2 libfl-dev zlib1g zlib1g-dev liblz4-dev
+          git clone --depth 1 --branch v5.052 https://github.com/verilator/verilator.git /tmp/verilator
+          cd /tmp/verilator
+          autoconf
+          ./configure --prefix=/home/runner/verilator-5.052
+          make -j$(nproc)
+          make install
+          rm -rf /tmp/verilator
+
+      - name: Package Verilator
+        run: tar -czf /tmp/verilator-5.052.tar.gz -C /home/runner verilator-5.052
+
+      - name: Upload Verilator artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verilator-artifact
+          path: /tmp/verilator-5.052.tar.gz
+
+  test-verilator:
+    name: Verilator ALU Simulation (${{ matrix.mode }})
+    needs: build-verilator
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: standard
+            cmd: "make run-verilator"
+            check_coverage: false
+          - mode: coverage
+            cmd: "make run-verilator-coverage"
+            check_coverage: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential \
+            gcc-14 \
+            g++-14 \
+            cmake \
+            git \
+            perl \
+            python3 \
+            zlib1g-dev \
+            libfl2 \
+            libfl-dev
+
+      - name: Download Verilator artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: verilator-artifact
+          path: /tmp
+
+      - name: Extract Verilator and Add to PATH
+        run: |
+          tar -xzf /tmp/verilator-5.052.tar.gz -C /home/runner
+          echo "/home/runner/verilator-5.052/bin" >> $GITHUB_PATH
+          /home/runner/verilator-5.052/bin/verilator --version
+
+      - name: Build Condor
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+
+      - name: Execute Verilator Pipeline (${{ matrix.mode }})
+        run: |
+          ${{ matrix.cmd }}
+
+      - name: Validate Coverage File Contract in test_metrics.yaml
+        run: |
+          LATEST_RUN=$(ls -td condor_runs/* | head -n 1)
+          echo "Inspecting latest run: $LATEST_RUN"
+          SAMPLE_METRICS="$LATEST_RUN/stages/sim_tests/0001/test_metrics.yaml"
+          cat "$SAMPLE_METRICS"
+
+          if [ "${{ matrix.check_coverage }}" = "true" ]; then
+            echo "Checking that coverage_file exists in metrics..."
+            grep -q "coverage_file:" "$SAMPLE_METRICS"
+            grep -q "coverage_enabled: true" "$SAMPLE_METRICS"
+          else
+            echo "Checking that coverage_file is NOT in metrics when coverage is disabled..."
+            if grep -q "coverage_file:" "$SAMPLE_METRICS"; then
+              echo "ERROR: coverage_file was unexpectedly emitted when coverage is disabled!" >&2
+              exit 1
+            fi
+            grep -q "coverage_enabled: false" "$SAMPLE_METRICS"
+          fi
+
+      - name: Upload Run Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: verilator-run-${{ matrix.mode }}
+          path: condor_runs/

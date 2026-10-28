@@ -1,0 +1,140 @@
+name: Distribution Packaging
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main, master, dev ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-deb:
+    name: Package Debian (.deb)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential \
+            cmake \
+            git \
+            dpkg-dev
+
+      - name: Configure CMake (Release)
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+      - name: Build Condor
+        run: cmake --build build -j$(nproc)
+
+      - name: Generate Debian Package (.deb)
+        run: |
+          mkdir -p build/packages
+          cd build && cpack -G DEB -B packages
+
+      - name: Inspect & Validate Package
+        run: |
+          ls -lh build/packages/*.deb
+          dpkg -I build/packages/*.deb
+          dpkg -c build/packages/*.deb
+
+      - name: Upload Debian Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: condor-deb
+          path: build/packages/*.deb
+
+  package-rpm:
+    name: Package Enterprise Linux (.rpm)
+    runs-on: ubuntu-24.04
+    container:
+      image: almalinux:9
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y epel-release dnf-plugins-core
+          dnf config-manager --set-enabled crb
+          dnf install -y --allowerasing \
+            gcc-c++ \
+            make \
+            cmake \
+            git \
+            rpm-build \
+            file
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure Git Safe Directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Configure CMake (Release)
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+      - name: Build Condor
+        run: cmake --build build -j$(nproc)
+
+      - name: Generate RPM Package (.rpm)
+        run: |
+          mkdir -p build/packages
+          cd build && cpack -G RPM -B packages
+
+      - name: Inspect & Validate Package
+        run: |
+          ls -lh build/packages/*.rpm
+          rpm -qip build/packages/*.rpm
+          rpm -qlp build/packages/*.rpm
+
+      - name: Upload RPM Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: condor-rpm
+          path: build/packages/*.rpm
+
+  package-tar:
+    name: Package Portable Tarball (.tar.gz)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential \
+            cmake \
+            git
+
+      - name: Configure CMake (Release)
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+      - name: Build Condor
+        run: cmake --build build -j$(nproc)
+
+      - name: Generate Portable Tarball (.tar.gz)
+        run: |
+          mkdir -p build/packages
+          cd build && cpack -G TGZ -B packages
+
+      - name: Inspect & Validate Tarball
+        run: |
+          ls -lh build/packages/*.tar.gz
+          tar -tzf build/packages/*.tar.gz
+          mkdir /tmp/extract
+          tar -xzf build/packages/*.tar.gz -C /tmp/extract
+          /tmp/extract/usr/bin/condor --help
+          /tmp/extract/usr/bin/condor --license
+          /tmp/extract/usr/bin/condor --warranty
+
+      - name: Upload Portable Tarball Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: condor-tar
+          path: build/packages/*.tar.gz

@@ -1,0 +1,25 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "condor",
+      "include-component-in-tag": false,
+      "changelog-path": "CHANGELOG.md",
+      "changelog-sections": [
+        {"type": "feat", "section": "Features"},
+        {"type": "feature", "section": "Features"},
+        {"type": "fix", "section": "Bug Fixes"},
+        {"type": "bugfix", "section": "Bug Fixes"},
+        {"type": "perf", "section": "Performance Improvements"},
+        {"type": "refactor", "section": "Code Refactoring"},
+        {"type": "docs", "section": "Documentation"},
+        {"type": "doc", "section": "Documentation"},
+        {"type": "test", "section": "Tests"},
+        {"type": "tests", "section": "Tests"},
+        {"type": "build", "section": "Build System"},
+        {"type": "ci", "section": "Continuous Integration"},
+        {"type": "chore", "section": "Maintenance"}
+      ]
+    }
+  }
+}

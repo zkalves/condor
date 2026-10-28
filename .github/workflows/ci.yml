@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main, master, dev ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    name: Build Project
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential \
+            gcc-14 \
+            g++-14 \
+            cmake \
+            git
+
+      - name: Configure CMake
+        run: cmake -B build -S . -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifact
+          path: build/
+          include-hidden-files: true
+
+  test-unit:
+    name: Unit & Integration Tests
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifact
+          path: build/
+
+      - name: Restore Executable Permissions
+        run: chmod +x build/condor build/condor_tests || true
+
+      - name: Run Test Suite
+        run: ./build/condor_tests
+
+      - name: Run CTest Verification
+        run: ctest --test-dir build --output-on-failure
+
+  test-examples:
+    name: Test Example (${{ matrix.example }})
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        example:
+          - simple
+          - conditional
+          - conditional-coverage
+          - matrix-and-includes
+          - failure-policies
+          - custom-backends
+          - dry-run
+          - ci-mode
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifact
+          path: build/
+
+      - name: Restore Executable Permissions
+        run: chmod +x build/condor || true
+
+      - name: Run Example Flow
+        run: |
+          case "${{ matrix.example }}" in
+            simple)
+              ./build/condor examples/simple/scripts/pipeline.yaml
+              ;;
+            conditional)
+              ./build/condor examples/conditional/scripts/pipeline.yaml
+              ;;
+            conditional-coverage)
+              ./build/condor examples/conditional/scripts/pipeline.yaml --define-variable coverage=1
+              ;;
+            matrix-and-includes)
+              ./build/condor examples/matrix_and_includes/scripts/pipeline.yaml
+              ;;
+            failure-policies)
+              ./build/condor examples/failure_policies/scripts/pipeline.yaml || true
+              ;;
+            custom-backends)
+              ./build/condor examples/custom_backends/scripts/pipeline.yaml
+              ;;
+            dry-run)
+              ./build/condor --dry-run examples/simple/scripts/pipeline.yaml
+              ./build/condor --dry-run examples/conditional/scripts/pipeline.yaml
+              ;;
+            ci-mode)
+              ./build/condor --no-interactive --status-interval-sec 2 examples/simple/scripts/pipeline.yaml
+              ;;
+          esac
