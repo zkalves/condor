@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="res/images/icon.svg" alt="Condor logo" width="128" height="128" />
+</p>
+
 # Condor
 
 > **Condor** (**Con**current + **D**ependency + **Or**chestrator) is a modern C++20 parallel process and grid orchestrator designed for high-performance pipelines, simulation harnesses, and build/test workflows.
@@ -281,7 +285,7 @@ The table below summarizes the minimal set of examples covering 100% of Condor's
 | :--- | :--- | :--- |
 | **Simple** | [`examples/simple/`](file:///home/eze/projects/github/condor/examples/simple/) | Linear DAG (`build -> test -> package`), stage-level dependencies, global variables, status interval. |
 | **Conditional DAG** | [`examples/conditional/`](file:///home/eze/projects/github/condor/examples/conditional/) | Diamond/branching DAG, stage & job-level `enabled_if` conditionals (`==`, `!=`, comparisons), skipped stage dependency satisfaction. |
-| **Matrix & Includes** | [`examples/matrix_and_includes/`](file:///home/eze/projects/github/condor/examples/matrix_and_includes/) | `path_style: relative`, global `defaults:`, test replication (`count: 4`), multi-seed sweeps (`seeds: [...]`), modular test suite `include: "test_suite.yaml"`. |
+| **Matrix & Includes** | [`examples/matrix_and_includes/`](file:///home/eze/projects/github/condor/examples/matrix_and_includes/) | `path_style: relative`, global `defaults:`, test replication (`count: 4`), parameter sweeps (`matrix: { SEED: [...] }`), modular test suite `include: "test_suite.yaml"`. |
 | **Failure Policies** | [`examples/failure_policies/`](file:///home/eze/projects/github/condor/examples/failure_policies/) | `on_failure_action: continue`, `exit_zero_on_failure: true`, `allow_failure: true` on stages & jobs, lifecycle hooks with `always: true`, `output_mode: failures`. |
 | **Custom Backends** | [`examples/custom_backends/`](file:///home/eze/projects/github/condor/examples/custom_backends/) | Custom template backends (`type: template` e.g. Slurm/SGE simulation), `{script}`, `{grid_id}`, `{job_id}`, cross-stage job-level `depends_on: ["prepare/0002"]`. |
 | **Verilator EDA** | [`examples/verilator/`](file:///home/eze/projects/github/condor/examples/verilator/) | Real-world hardware verification pipeline, SystemVerilog RTL, cycle-accurate C++ testbench, 10 test suites, conditional coverage (`verilator_coverage`), unified report generation. |
@@ -297,7 +301,7 @@ make run-conditional
 # Conditional execution with coverage enabled
 make run-coverage
 
-# Matrix scaling (count: 4), seeds parameter sweep, and modular includes
+# Matrix scaling (count: 4), parameter sweeps, and modular includes
 make run-matrix
 
 # Failure policies (continue on failure), allowed failures, and always-run cleanup hooks

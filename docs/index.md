@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/condor_logo.svg" alt="Condor logo" width="128" height="128" />
+  <img src="res/images/icon.svg" alt="Condor logo" width="128" height="128" />
 </p>
 
 # Condor Documentation Portal
@@ -34,7 +34,7 @@ docs/
 ## 🧭 Documentation Portals
 
 - @subpage user_guide "📘 Condor User Guide"
-  Comprehensive operational manual for verification engineers, software developers, and DevOps teams. Contains role-based learning roadmaps and complete guides for pipeline YAML authoring, parameter sweeps (`seeds`, `count`), modular includes, failure policies, interactive runtime menu controls, and custom execution backends.
+  Comprehensive operational manual for verification engineers, software developers, and DevOps teams. Contains role-based learning roadmaps and complete guides for pipeline YAML authoring, parameter sweeps (`matrix`, `count`), modular includes, failure policies, interactive runtime menu controls, and custom execution backends.
 
 - @subpage dev_guide "🛠️ Condor Developer Guide"
   Comprehensive technical documentation for developers contributing to or extending **Condor**. Details the Modern C++20 subsystem architecture, DAG scheduler algorithms, memory layout, process execution engine, POSIX signal propagation, testing infrastructure, and automated Doxygen C++ API reference.

@@ -4,7 +4,7 @@
 PROJECT_NAME           = "Condor"
 PROJECT_NUMBER         = "1.0.0"
 PROJECT_BRIEF          = "Concurrent + Dependency + Orchestrator (Modern C++20 Parallel Process and Grid DAG Orchestrator)"
-PROJECT_LOGO           = docs/images/condor_logo.svg
+PROJECT_LOGO           = res/images/icon.svg
 
 OUTPUT_DIRECTORY       = _site
 CREATE_SUBDIRS         = NO
