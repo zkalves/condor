@@ -47,7 +47,8 @@ void RuntimeMenu::handle_sigint() {
         // Double CTRL+C within 2 seconds
         trigger_hard_kill();
         const char msg[] = "\n[ABORT] Double CTRL+C detected! Immediately terminating all jobs...\n";
-        write(STDERR_FILENO, msg, sizeof(msg) - 1);
+        ssize_t written = write(STDERR_FILENO, msg, sizeof(msg) - 1);
+        (void)written;
         if (active_scheduler_) {
             active_scheduler_->abort_all();
         }
@@ -55,7 +56,8 @@ void RuntimeMenu::handle_sigint() {
         // First CTRL+C
         menu_requested_ = true;
         const char msg[] = "\n(Press CTRL+C again within 2 seconds to abort all jobs, or use the runtime menu)\n";
-        write(STDERR_FILENO, msg, sizeof(msg) - 1);
+        ssize_t written = write(STDERR_FILENO, msg, sizeof(msg) - 1);
+        (void)written;
     }
 }
 
