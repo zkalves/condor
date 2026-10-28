@@ -86,6 +86,10 @@ struct JobDefaults {
     std::string args;                                        ///< Default extra arguments appended to command.
     std::optional<bool> append_args;                         ///< If true, append args to parent defaults rather than overriding.
     std::optional<bool> scalable;                            ///< If false, job count is pinned and unaffected by count multipliers.
+    std::string backend;                                     ///< Default backend identifier.
+    std::string working_dir;                                 ///< Default working directory for execution.
+    std::string timeout;                                     ///< Default timeout duration string (e.g. "30m").
+    int timeout_sec{0};                                      ///< Parsed timeout duration in seconds.
     HookConfig hooks;                                        ///< Default lifecycle hooks.
     std::unordered_map<std::string, std::string> variables;  ///< Default variables scoped to this hierarchy level.
 };
@@ -107,6 +111,10 @@ struct JobConfig {
     std::string name;                                       ///< Descriptive human-readable job name.
     std::string command;                                    ///< Shell command to execute.
     std::string stage_name;                                 ///< Parent stage containing this job.
+    std::string backend;                                    ///< Optional backend identifier override for this job.
+    std::string working_dir;                                ///< Optional custom working directory for execution.
+    std::string timeout;                                    ///< Optional timeout duration string (e.g. "15m", "300s").
+    int timeout_sec{0};                                     ///< Parsed timeout in seconds (0 = disabled).
     std::string enabled_if;                                 ///< Conditional evaluation expression (e.g. "${coverage} == 1").
     bool allow_failure{false};                              ///< If true, non-zero exit code does not trigger failure policies.
     std::vector<std::string> depends_on;                    ///< List of prerequisite job IDs or stage names.
@@ -124,6 +132,8 @@ struct JobConfig {
  */
 struct StageConfig {
     std::string name;                     ///< Unique alphanumeric stage identifier.
+    std::string backend;                  ///< Optional backend identifier override for all jobs in this stage.
+    StageExecutionMode mode{StageExecutionMode::FULL}; ///< Stage execution mode (full, failed_only, cached).
     std::string enabled_if;               ///< Stage-level conditional evaluation expression.
     bool allow_failure{false};             ///< If true, stage failure does not abort the entire pipeline.
     std::vector<std::string> depends_on;  ///< Prerequisite stage names that must pass before this stage starts.
@@ -141,11 +151,15 @@ struct PipelineSettings {
     size_t max_parallel_jobs{0};                          ///< Max concurrent jobs (0 = automatic hardware concurrency).
     std::string base_output_dir{"./condor_runs"};          ///< Root directory where execution timestamped runs are stored.
     std::string run_dir;                                  ///< Explicit run folder override if specified via --run-dir.
+    std::string rerun_base_dir;                           ///< Previous run folder to re-run failures from.
+    std::unordered_map<std::string, StageExecutionMode> stage_modes; ///< Per-stage execution modes for reruns.
     FailureAction on_failure_action{FailureAction::ABORT}; ///< Failure policy: abort, continue, or stage_barrier.
     bool exit_zero_on_failure{false};                     ///< If true, condor process exits with 0 even if jobs failed.
     int status_interval_sec{30};                          ///< Periodic status dump interval for CI / non-interactive mode.
+    int grid_poll_interval_sec{10};                       ///< Polling interval in seconds for template/grid backends (default: 10s).
+    bool emit_junit_xml{true};                            ///< Emit standard junit_report.xml upon completion.
+    std::string junit_xml_path;                           ///< Custom destination path for junit_report.xml if specified.
     std::string backend{"local"};                         ///< Pipeline execution backend configured under settings.
-    std::string default_backend{"local"};                 ///< Backwards-compatible alias for settings backend.
     bool dry_run{false};                                  ///< If true, validate pipeline and print plan without executing.
     bool no_interactive{false};                           ///< If true, disable raw terminal escape codes and interactive menu.
     bool verbose_logging{false};                          ///< If true, print verbose debug logs.

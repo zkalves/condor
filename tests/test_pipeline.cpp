@@ -94,7 +94,7 @@ stages:
     ASSERT_TRUE(std::filesystem::exists(ws.job_dir("stage_dependent", "0001") / "dep.txt"));
 
     // Verify HTML report correctly shows "1/1 skipped" and NOT "0/1 passed"
-    auto report_path = ws.run_dir() / "report.html";
+    auto report_path = ws.artifacts_dir() / "report.html";
     ASSERT_TRUE(std::filesystem::exists(report_path));
     std::ifstream report_ifs(report_path);
     std::string report_html((std::istreambuf_iterator<char>(report_ifs)), std::istreambuf_iterator<char>());
@@ -229,7 +229,7 @@ stages:
     ASSERT_TRUE(runner_content.find("eval \"$CONDOR_COMMAND\"") == std::string::npos); // No opaque eval!
 
     // Verify HTML report was generated with per-stage elements
-    auto report_path = ws.run_dir() / "report.html";
+    auto report_path = ws.artifacts_dir() / "report.html";
     ASSERT_TRUE(std::filesystem::exists(report_path));
     std::ifstream report_ifs(report_path);
     std::string report_html((std::istreambuf_iterator<char>(report_ifs)), std::istreambuf_iterator<char>());
@@ -297,11 +297,11 @@ stages:
     sd_file >> sd_val;
     ASSERT_EQ(sd_val, "..");
 
-    // Verify CONDOR_RUN_DIR was "../.."
+    // Verify CONDOR_RUN_DIR was "../../.."
     std::ifstream rd_file(ws.job_dir("test_stage", "0001") / "run_dir.txt");
     std::string rd_val;
     rd_file >> rd_val;
-    ASSERT_EQ(rd_val, "../..");
+    ASSERT_EQ(rd_val, "../../..");
 
     // Verify TEST_DIR was "."
     std::ifstream td_file(ws.job_dir("test_stage", "0001") / "test_dir.txt");
@@ -322,7 +322,7 @@ stages:
     std::stringstream runner_ss;
     runner_ss << runner_ifs.rdbuf();
     std::string runner_content = runner_ss.str();
-    ASSERT_TRUE(runner_content.find("export CONDOR_RUN_DIR=\"../..\"") != std::string::npos);
+    ASSERT_TRUE(runner_content.find("export CONDOR_RUN_DIR=\"../../..\"") != std::string::npos);
     ASSERT_TRUE(runner_content.find("export CONDOR_STAGE_DIR=\"..\"") != std::string::npos);
     ASSERT_TRUE(runner_content.find("export CONDOR_JOB_DIR=\".\"") != std::string::npos);
     ASSERT_TRUE(runner_content.find("export BUILD_DIR=\"../../build_stage/0001\"") != std::string::npos);
@@ -338,7 +338,7 @@ stages:
     ASSERT_TRUE(yaml_content.find("working_directory: \".\"") != std::string::npos);
 
     // Verify HTML report contains "Path Style: relative"
-    auto report_path = ws.run_dir() / "report.html";
+    auto report_path = ws.artifacts_dir() / "report.html";
     ASSERT_TRUE(std::filesystem::exists(report_path));
     std::ifstream report_ifs(report_path);
     std::string report_html((std::istreambuf_iterator<char>(report_ifs)), std::istreambuf_iterator<char>());

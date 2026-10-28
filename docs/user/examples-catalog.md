@@ -19,7 +19,7 @@ examples/<example_name>/
 | :--- | :--- | :--- | :--- |
 | **1. Simple** | [`examples/simple/`](file:///home/eze/projects/github/condor/examples/simple/) | Linear DAG (`build -> test -> package`), stage-level DAG dependencies, global & stage variables, status interval. | `make run-simple` |
 | **2. Conditional DAG** | [`examples/conditional/`](file:///home/eze/projects/github/condor/examples/conditional/) | Diamond/branching DAG, stage & job-level `enabled_if` conditionals (`==`, `!=`, comparisons), skipped stage dependency satisfaction. | `make run-conditional`<br>`make run-coverage` |
-| **3. Matrix & Includes** | [`examples/matrix_and_includes/`](file:///home/eze/projects/github/condor/examples/matrix_and_includes/) | `path_style: relative`, global `defaults:`, test scaling (`count: 4`), multi-seed sweeps (`seeds: [...]`), modular test suite `include: "test_suite.yaml"`. | `make run-matrix` |
+| **3. Matrix & Includes** | [`examples/matrix_and_includes/`](file:///home/eze/projects/github/condor/examples/matrix_and_includes/) | `path_style: relative`, global `defaults:`, test scaling (`count: 4`), parameter sweeps (`matrix: {...}`), modular test suite `include: "test_suite.yaml"`. | `make run-matrix` |
 | **4. Failure Policies** | [`examples/failure_policies/`](file:///home/eze/projects/github/condor/examples/failure_policies/) | `on_failure_action: continue`, `exit_zero_on_failure: true`, `allow_failure: true` on stages & jobs, lifecycle hooks with `always: true`, `output_mode: failures`. | `make run-failures` |
 | **5. Custom Backends** | [`examples/custom_backends/`](file:///home/eze/projects/github/condor/examples/custom_backends/) | Custom template backends (`type: template` simulating Slurm/SGE/cloud), `{script}`, `{grid_id}`, `{job_id}`, pipeline backend configuration (`settings.backend: grid_cluster`), job-level dependencies (`depends_on: ["prepare/0002"]`). | `make run-backends` |
 | **6. EDA Verification** | [`examples/verilator/`](file:///home/eze/projects/github/condor/examples/verilator/) | Real-world EDA hardware verification pipeline, SystemVerilog RTL, cycle-accurate simulation, 10 test suites, conditional coverage collection/merging, unified reports. | `make run-verilator`<br>`make run-verilator-coverage` |
@@ -79,7 +79,7 @@ Demonstrates massive test scaling, parameter sweeps, and modular YAML inclusion:
   - Global `defaults:` block defining command templates
   - Stage-level `defaults:` merging
   - `count: 4` (dispatches 4 parallel stress instances)
-  - `seeds: [101, 202, 303, 404]` (sweeps 4 random seeds)
+  - `matrix: { SEED: [101, 202, 303, 404] }` (parameter sweeps)
   - Custom machine metrics generation (`test_metric.yaml`)
 
 ```bash

@@ -291,7 +291,7 @@ Passed:       4
 Failed:       0
 Skipped:      0
 Total Time:   00:00:01
-HTML Report:  /path/to/condor_runs/20261026_145117_491021/report.html
+HTML Report:  /path/to/condor_runs/20261026_145117_491021/artifacts/report.html
 ================================================================================
 ```
 
@@ -299,7 +299,7 @@ HTML Report:  /path/to/condor_runs/20261026_145117_491021/report.html
 
 Open the generated HTML report in your browser:
 ```bash
-xdg-open ./condor_runs/latest/report.html
+xdg-open ./condor_runs/latest/artifacts/report.html
 ```
 
 ---

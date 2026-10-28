@@ -49,8 +49,8 @@ The unit test suite consists of 23 targeted test cases across 6 test modules:
 | | `invalid_stage_name_yaml` | Ensures YAML parser rejects stage names with illegal characters (`"test stage"`). |
 | | `dag_cycle_detection` | Verifies DFS cycle detector detects cyclic dependencies (`A -> B -> C -> A`). |
 | | `dag_unknown_dependency`| Verifies parser rejects stages depending on non-existent stages. |
-| | `seed_and_count_mutual_exclusion` | Enforces mutual exclusivity: jobs cannot specify both `count` and `seed`/`seeds`. |
-| `test_variable.cpp` | `seed_expansion_and_defaults` | Tests `seeds: [10, 20]` parameter sweep job expansion. |
+| | `seed_and_seeds_rejection` | Enforces rejection of unsupported seed properties. |
+| | `matrix_expansion_and_defaults` | Tests matrix parameter sweep job expansion and defaults inheritance. |
 | | `count_expansion` | Tests `count: 5` matrix job replication with sequential indices (`0001` to `0005`). |
 | | `variable_interpolation` | Tests `${VAR}`, `$VAR`, and `${VAR:-default}` string replacements. |
 | | `variable_cli_definitions`| Tests CLI variable overriding (`--define-variable KEY=VAL`). |

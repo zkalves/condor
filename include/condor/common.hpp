@@ -45,7 +45,8 @@ enum class JobStatus {
     FAILED,         ///< Completed with non-zero exit code and failure was not allowed.
     FAILED_ALLOWED, ///< Completed with non-zero exit code but marked allow_failure: true.
     SKIPPED,        ///< Skipped due to unmet enabled_if condition or upstream failure barrier.
-    ABORTED         ///< Canceled or killed prematurely by scheduler or user signal.
+    ABORTED,        ///< Canceled or killed prematurely by scheduler or user signal.
+    TIMEOUT         ///< Terminated because runtime duration exceeded configured timeout.
 };
 
 /**
@@ -62,8 +63,71 @@ inline std::string to_string(JobStatus status) {
         case JobStatus::FAILED_ALLOWED: return "FAILED (ALLOWED)";
         case JobStatus::SKIPPED:        return "SKIPPED";
         case JobStatus::ABORTED:        return "ABORTED";
+        case JobStatus::TIMEOUT:        return "TIMEOUT";
     }
     return "UNKNOWN";
+}
+
+/**
+ * @enum StageExecutionMode
+ * @brief Execution mode for a stage during whole-pipeline or selective rerun execution.
+ */
+enum class StageExecutionMode {
+    FULL,        ///< Execute all jobs in stage normally with current configuration.
+    FAILED_ONLY, ///< Re-run only jobs that failed or aborted in the base run; cache passed jobs.
+    CACHED       ///< Treat all jobs as passed/cached from the base run.
+};
+
+inline StageExecutionMode parse_stage_execution_mode(std::string_view mode) {
+    if (mode == "full") return StageExecutionMode::FULL;
+    if (mode == "failed_only" || mode == "failed" || mode == "failures") return StageExecutionMode::FAILED_ONLY;
+    if (mode == "cached" || mode == "skip" || mode == "skipped") return StageExecutionMode::CACHED;
+    throw std::runtime_error("Invalid stage execution mode: '" + std::string(mode) + "'. Must be full, failed_only, or cached.");
+}
+
+inline std::string to_string(StageExecutionMode mode) {
+    switch (mode) {
+        case StageExecutionMode::FULL:        return "full";
+        case StageExecutionMode::FAILED_ONLY: return "failed_only";
+        case StageExecutionMode::CACHED:      return "cached";
+    }
+    return "full";
+}
+
+/**
+ * @brief Parses a timeout duration string (e.g. "30s", "10m", "2h", "1800") into seconds.
+ * @param str Duration string.
+ * @return Duration in seconds (0 = no timeout).
+ */
+inline int parse_timeout_seconds(std::string_view str) {
+    if (str.empty()) return 0;
+    std::string s(str);
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+    if (s.empty()) return 0;
+
+    char unit = s.back();
+    int multiplier = 1;
+    if (unit == 's' || unit == 'S') {
+        multiplier = 1;
+        s.pop_back();
+    } else if (unit == 'm' || unit == 'M') {
+        multiplier = 60;
+        s.pop_back();
+    } else if (unit == 'h' || unit == 'H') {
+        multiplier = 3600;
+        s.pop_back();
+    } else if (unit == 'd' || unit == 'D') {
+        multiplier = 86400;
+        s.pop_back();
+    }
+
+    try {
+        int val = std::stoi(s);
+        return (val > 0) ? (val * multiplier) : 0;
+    } catch (...) {
+        return 0;
+    }
 }
 
 /**

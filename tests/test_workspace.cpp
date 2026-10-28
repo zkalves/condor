@@ -51,6 +51,12 @@ TEST_CASE(workspace_initialization_and_symlink) {
     ws.initialize();
 
     ASSERT_TRUE(std::filesystem::exists(ws.run_dir()));
+    ASSERT_TRUE(std::filesystem::exists(ws.artifacts_dir()));
+    ASSERT_TRUE(std::filesystem::exists(ws.pipeline_dir()));
+    ASSERT_TRUE(std::filesystem::exists(ws.stages_dir()));
+    ASSERT_TRUE(ws.artifacts_dir() == ws.run_dir() / "artifacts");
+    ASSERT_TRUE(ws.pipeline_dir() == ws.run_dir() / "pipeline");
+    ASSERT_TRUE(ws.stages_dir() == ws.run_dir() / "stages");
     ASSERT_TRUE(std::filesystem::exists(std::filesystem::path(test_base) / "latest"));
     ASSERT_TRUE(std::filesystem::is_symlink(std::filesystem::path(test_base) / "latest"));
 
@@ -58,6 +64,8 @@ TEST_CASE(workspace_initialization_and_symlink) {
     ws.create_stage_dir("build_rtl");
     ws.create_job_dir("build_rtl", "0001");
     ASSERT_TRUE(std::filesystem::exists(ws.job_dir("build_rtl", "0001")));
+    ASSERT_TRUE(ws.stage_dir("build_rtl") == ws.run_dir() / "stages" / "build_rtl");
+    ASSERT_TRUE(ws.job_dir("build_rtl", "0001") == ws.run_dir() / "stages" / "build_rtl" / "0001");
 
     // Manifest test
     std::vector<StageManifestEntry> entries = {

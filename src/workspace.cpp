@@ -63,17 +63,33 @@ void WorkspaceManager::initialize() {
         throw ExecutionError("Failed to create run directory: " + run_dir_.string() + " (" + ec.message() + ")");
     }
 
+    std::filesystem::create_directories(artifacts_dir(), ec);
+    std::filesystem::create_directories(pipeline_dir(), ec);
+    std::filesystem::create_directories(stages_dir(), ec);
+
     if (!is_fixed_) {
         update_latest_symlink();
     }
 }
 
+std::filesystem::path WorkspaceManager::artifacts_dir() const {
+    return run_dir_ / "artifacts";
+}
+
+std::filesystem::path WorkspaceManager::pipeline_dir() const {
+    return run_dir_ / "pipeline";
+}
+
+std::filesystem::path WorkspaceManager::stages_dir() const {
+    return run_dir_ / "stages";
+}
+
 std::filesystem::path WorkspaceManager::stage_dir(std::string_view stage_name) const {
-    return run_dir_ / stage_name;
+    return run_dir_ / "stages" / stage_name;
 }
 
 std::filesystem::path WorkspaceManager::job_dir(std::string_view stage_name, std::string_view job_id) const {
-    return run_dir_ / stage_name / job_id;
+    return run_dir_ / "stages" / stage_name / job_id;
 }
 
 void WorkspaceManager::create_stage_dir(std::string_view stage_name) {
@@ -123,7 +139,7 @@ void WorkspaceManager::update_stage_manifest(std::string_view stage_name,
 void WorkspaceManager::write_job_status(std::string_view stage_name, const JobMetadata& meta) {
     auto jdir = job_dir(stage_name, meta.job_id);
 
-    // 1. Write legacy / spec job_status.txt
+    // 1. Write human-readable job_status.txt
     auto status_path = jdir / "job_status.txt";
     std::ofstream out(status_path, std::ios::trunc);
     if (!out) {

@@ -25,8 +25,13 @@ condor [OPTIONS] <pipeline.yaml>
 | `--on-failure-action`| `abort`, `continue`, `stage_barrier` | `abort` | Override failure handling policy when a job fails. |
 | `--exit-zero-on-failure`| None (Flag) | `false` | Return exit status code `0` even if individual jobs or stages encounter failures. |
 | `--status-interval-sec`| `<seconds>` | `30` | Interval in seconds to output periodic status summary dumps in non-interactive CI mode. |
-| `--output-mode` | `all`, `failures`, `summary` | `all` | Terminal event reporting verbosity. Alias: `--terminal-output`. |
-| `--path-style` | `absolute`, `relative` | `absolute` | Path representation inside runs. Alias: `--path-mode`. |
+| `--count-multiplier`   | `<N>` | `1` | Multiplier for scalable job counts across the pipeline. |
+| `--rerun`              | `<path>` | None | Base run directory to incrementally re-run failures from. |
+| `--stage-mode`         | `<stage>:<mode>` | Configured in YAML | Override stage execution mode (`full`, `failed_only`, `cached`). Repeatable. |
+| `--grid-poll-interval-sec` | `<seconds>` | `10` | Polling interval in seconds for cluster/grid backends. |
+| `--junit-xml`          | `<path>` | `artifacts/junit_report.xml` | Emit standard JUnit/xUnit XML test report to file. |
+| `--output-mode` | `all`, `failures`, `summary` | `all` | Terminal event reporting verbosity. |
+| `--path-style` | `absolute`, `relative` | `absolute` | Path representation inside runs. |
 | `--relative-paths` | None (Flag) | `false` | Convenience flag to enable relative paths inside runs (equivalent to `--path-style=relative`). |
 | `--absolute-paths` | None (Flag) | `true` | Convenience flag to force absolute paths inside runs (equivalent to `--path-style=absolute`). |
 | `--define-variable` | `<KEY=VAL>` | None | Define or override pipeline variables from the command line. Repeatable for multiple variables. |
@@ -112,14 +117,15 @@ Every job runner script (`job_runner.sh`) and hook script receives the following
 
 | Variable | Description | Example (Relative Mode) | Example (Absolute Mode) |
 | :--- | :--- | :--- | :--- |
-| `CONDOR_RUN_DIR` | Top-level execution directory for the current run | `../..` | `/home/user/condor_runs/20261026_120000_123456` |
+| `CONDOR_RUN_DIR` | Top-level execution directory for the current run | `../../..` | `/home/user/condor_runs/20261026_120000_123456` |
 | `CONDOR_STAGE_NAME`| Name of the active stage | `sim_tests` | `sim_tests` |
-| `CONDOR_STAGE_DIR` | Directory holding all jobs for the stage | `..` | `/home/user/condor_runs/.../sim_tests` |
+| `CONDOR_STAGE_DIR` | Directory holding all jobs for the stage | `..` | `/home/user/condor_runs/.../stages/sim_tests` |
 | `CONDOR_JOB_ID` | 4-digit sequential job identifier | `0001` | `0001` |
 | `CONDOR_JOB_NAME` | Configured name of the job | `arithmetic` | `arithmetic` |
-| `CONDOR_JOB_DIR` | Dedicated working directory for the job | `.` | `/home/user/condor_runs/.../sim_tests/0001` |
-| `BUILD_DIR` | Discovered build artifact directory | `../../build_rtl/0001` | `/home/user/condor_runs/.../build_rtl/0001` |
-| `TEST_DIR` | Working test directory | `.` | `/home/user/condor_runs/.../sim_tests/0001` |
+| `CONDOR_JOB_DIR` | Dedicated working directory for the job | `.` | `/home/user/condor_runs/.../stages/sim_tests/0001` |
+| `BUILD_DIR` | Discovered build artifact directory | `../../build_rtl/0001` | `/home/user/condor_runs/.../stages/build_rtl/0001` |
+| `TEST_DIR` | Working test directory | `.` | `/home/user/condor_runs/.../stages/sim_tests/0001` |
+| `CONDOR_ARTIFACTS_DIR` | Pipeline artifacts and reports directory | `../../../artifacts` | `/home/user/condor_runs/.../artifacts` |
 | `CONDOR_PATH_STYLE`| Configured path style | `relative` | `absolute` |
 | `CONDOR_OUTPUT_MODE`| Configured output mode | `summary` | `summary` |
 | `CONDOR_PIPELINE_DIR`| Directory containing the pipeline configuration | `../../../../examples/hardware_test/scripts` | `/home/user/project/examples/hardware_test/scripts` |

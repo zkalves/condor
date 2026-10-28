@@ -55,6 +55,7 @@ struct JobExecutionContext {
     std::string build_dir;                                        ///< Pipeline build output directory.
     std::string test_dir;                                         ///< Pipeline test output directory.
     std::string physical_job_dir;                                 ///< Actual canonical host filesystem path for runner script & chdir.
+    std::string working_dir;                                      ///< Optional target execution directory override.
 
     std::vector<std::pair<std::string, std::string>> env_vars;    ///< Scoped environment variable key-value pairs.
 
@@ -92,6 +93,12 @@ public:
     virtual std::string_view name() const = 0;
 
     /**
+     * @brief Gets the execution type of this backend (LOCAL or TEMPLATE).
+     * @return BackendType enum value.
+     */
+    virtual BackendType type() const { return BackendType::LOCAL; }
+
+    /**
      * @brief Submits or spawns a job asynchronously.
      * @param ctx Execution context containing paths, scripts, and environment.
      */
@@ -118,6 +125,7 @@ public:
 class LocalBackend : public ExecutionBackend {
 public:
     std::string_view name() const override { return "local"; }
+    BackendType type() const override { return BackendType::LOCAL; }
 
     void submit(JobExecutionContext& ctx) override;
     PollResult poll(JobExecutionContext& ctx) override;
@@ -140,6 +148,7 @@ public:
     explicit TemplateBackend(const BackendConfig& config) : config_(config) {}
 
     std::string_view name() const override { return config_.name; }
+    BackendType type() const override { return BackendType::TEMPLATE; }
 
     void submit(JobExecutionContext& ctx) override;
     PollResult poll(JobExecutionContext& ctx) override;

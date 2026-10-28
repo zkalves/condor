@@ -41,11 +41,11 @@ int main(int argc, char** argv) {
     // Early command handler for GNU GPL legal queries ('condor --warranty' and 'condor --license')
     if (argc >= 2) {
         std::string_view arg(argv[1]);
-        if (arg == "--warranty" || arg == "warranty" || (arg == "show" && argc >= 3 && std::string_view(argv[2]) == "w")) {
+        if (arg == "--warranty" || arg == "warranty") {
             RuntimeMenu::print_warranty();
             return 0;
         }
-        if (arg == "--license" || arg == "license" || arg == "--copying" || (arg == "show" && argc >= 3 && std::string_view(argv[2]) == "c")) {
+        if (arg == "--license" || arg == "license") {
             RuntimeMenu::print_conditions();
             return 0;
         }
@@ -71,6 +71,10 @@ int main(int argc, char** argv) {
     bool no_interactive{false};
     bool verbose_logging{false};
     size_t count_multiplier{0};
+    std::string rerun_base_dir;
+    std::vector<std::string> stage_modes_cli;
+    int grid_poll_interval_sec{0};
+    std::string junit_xml_path;
 
     // CLI Options per specification
     app.add_option("pipeline_file,--pipeline-config", pipeline_config_path, "Path to pipeline YAML configuration")
@@ -86,11 +90,16 @@ int main(int argc, char** argv) {
     app.add_option("--on-failure-action", on_failure_action_str, "Override failure policy (abort, continue, stage_barrier)");
     app.add_flag("--exit-zero-on-failure", exit_zero_on_failure, "Force return code 0 even if jobs or stages fail");
     app.add_option("--status-interval-sec", status_interval_sec, "Interval in seconds to dump status summaries in CI mode (default: 30)");
-    app.add_option("--output-mode,--terminal-output", output_mode_str, "Terminal output mode (all, failures, summary)");
-    app.add_option("--path-style,--path-mode", path_style_str, "Path representation inside runs (absolute, relative)");
+    app.add_option("--output-mode", output_mode_str, "Terminal output mode (all, failures, summary)");
+    app.add_option("--path-style", path_style_str, "Path representation inside runs (absolute, relative)");
     app.add_flag("--relative-paths", relative_paths, "Use relative paths inside runs (equivalent to --path-style=relative)");
     app.add_flag("--absolute-paths", absolute_paths, "Use absolute paths inside runs (equivalent to --path-style=absolute)");
     app.add_option("--define-variable", defined_variables, "Define or override configuration variables (KEY=VAL, repeatable)");
+    app.add_option("--rerun", rerun_base_dir, "Base run directory to re-run from (supports incremental rerun of failed jobs)");
+    app.add_option("--stage-mode", stage_modes_cli, "Override stage execution mode (STAGE:MODE where mode is full, failed_only, cached; repeatable)");
+    app.add_option("--grid-poll-interval-sec", grid_poll_interval_sec, "Polling interval in seconds for cluster/grid backends (default: 10)");
+    auto* junit_opt = app.add_option("--junit-xml", junit_xml_path, "Emit JUnit/xUnit XML test report to file (default: junit_report.xml)")
+       ->expected(0, 1);
     app.add_flag("--dry-run", dry_run, "Validate stage names, DAG cycles, evaluate conditions, print plan, and exit");
     app.add_flag("--no-interactive", no_interactive, "Disable interactive stdin polling and ANSI progress redraws (CI mode)");
     app.add_flag("--verbose-logging", verbose_logging, "Enable detailed scheduler event logging");
@@ -98,7 +107,7 @@ int main(int argc, char** argv) {
         RuntimeMenu::print_warranty();
         std::exit(0);
     }, "Display GNU General Public License warranty disclaimer");
-    app.add_flag_callback("--license,--copying", []() {
+    app.add_flag_callback("--license", []() {
         RuntimeMenu::print_conditions();
         std::exit(0);
     }, "Display GNU General Public License redistribution conditions");
@@ -227,6 +236,38 @@ int main(int argc, char** argv) {
     config.variables.set("path_style", to_string(config.settings.path_style));
     config.variables.set("CONDOR_PATH_STYLE", to_string(config.settings.path_style));
 
+    if (!rerun_base_dir.empty()) {
+        config.settings.rerun_base_dir = rerun_base_dir;
+    }
+
+    for (const auto& sm : stage_modes_cli) {
+        auto colon_pos = sm.find(':');
+        if (colon_pos == std::string::npos) {
+            std::cerr << "Configuration error: --stage-mode expects format <stage>:<mode> (e.g. sim_tests:failed_only), got: "
+                      << sm << std::endl;
+            return 1;
+        }
+        std::string s_name = sm.substr(0, colon_pos);
+        std::string s_mode_str = sm.substr(colon_pos + 1);
+        try {
+            config.settings.stage_modes[s_name] = parse_stage_execution_mode(s_mode_str);
+        } catch (const std::exception& e) {
+            std::cerr << "Configuration error for --stage-mode: " << e.what() << std::endl;
+            return 1;
+        }
+    }
+
+    if (grid_poll_interval_sec > 0) {
+        config.settings.grid_poll_interval_sec = grid_poll_interval_sec;
+    }
+
+    if (junit_opt->count() > 0) {
+        config.settings.emit_junit_xml = true;
+        if (!junit_xml_path.empty()) {
+            config.settings.junit_xml_path = junit_xml_path;
+        }
+    }
+
     config.settings.dry_run = dry_run;
     config.settings.no_interactive = no_interactive;
     config.settings.verbose_logging = verbose_logging;
@@ -240,8 +281,16 @@ int main(int argc, char** argv) {
                   << "On Failure Action:   " << to_string(config.settings.on_failure_action) << "\n"
                   << "Exit Zero On Fail:   " << (config.settings.exit_zero_on_failure ? "true" : "false") << "\n"
                   << "Output Mode:         " << to_string(config.settings.output_mode) << "\n"
-                  << "Path Style:          " << to_string(config.settings.path_style) << "\n"
-                  << "----------------------------------------------------------------\n"
+                  << "Path Style:          " << to_string(config.settings.path_style) << "\n";
+        if (!config.settings.rerun_base_dir.empty()) {
+            std::cout << "Rerun Base Dir:      " << config.settings.rerun_base_dir << "\n";
+        }
+        if (config.settings.emit_junit_xml) {
+            std::cout << "JUnit XML Report:    "
+                      << (!config.settings.junit_xml_path.empty() ? config.settings.junit_xml_path : "<run_dir>/artifacts/junit_report.xml")
+                      << "\n";
+        }
+        std::cout << "----------------------------------------------------------------\n"
                   << "Defined Variables:\n";
         for (const auto& [k, v] : config.variables.variables()) {
             std::cout << "  " << k << " = \"" << v << "\" (Exported as "
@@ -255,9 +304,19 @@ int main(int argc, char** argv) {
                 continue;
             }
             bool stage_enabled = ExpressionEvaluator::evaluate(stage.enabled_if, config.variables);
+            StageExecutionMode smode = stage.mode;
+            auto mode_it = config.settings.stage_modes.find(stage.name);
+            if (mode_it != config.settings.stage_modes.end()) {
+                smode = mode_it->second;
+            }
             std::cout << "\n[STAGE] " << stage.name
-                      << " (Enabled: " << (stage_enabled ? "YES" : "NO - SKIPPED")
-                      << ", Allow Failure: " << (stage.allow_failure ? "true" : "false") << ")\n";
+                      << " (Mode: " << to_string(smode)
+                      << ", Enabled: " << (stage_enabled ? "YES" : "NO - SKIPPED")
+                      << ", Allow Failure: " << (stage.allow_failure ? "true" : "false");
+            if (!stage.backend.empty()) {
+                std::cout << ", Backend: " << stage.backend;
+            }
+            std::cout << ")\n";
             if (!stage.depends_on.empty()) {
                 std::cout << "  Depends On: ";
                 for (size_t i = 0; i < stage.depends_on.size(); ++i) {
@@ -268,18 +327,33 @@ int main(int argc, char** argv) {
             for (const auto& job : stage.jobs) {
                 bool job_enabled = stage_enabled && ExpressionEvaluator::evaluate(job.enabled_if, config.variables);
                 std::string interp_cmd = config.variables.interpolate(job.command);
-                std::string bname = !config.settings.backend_override.empty()
-                                    ? config.settings.backend_override
-                                    : (!config.settings.backend.empty() ? config.settings.backend : config.settings.default_backend);
+                std::string bname;
+                if (!config.settings.backend_override.empty()) {
+                    bname = config.settings.backend_override;
+                } else if (!job.backend.empty()) {
+                    bname = job.backend;
+                } else if (!stage.backend.empty()) {
+                    bname = stage.backend;
+                } else if (!config.settings.backend.empty()) {
+                    bname = config.settings.backend;
+                } else {
+                    bname = "local";
+                }
                 if (bname.empty()) bname = "local";
 
                 std::string job_path_str = (config.settings.path_style == PathStyle::RELATIVE)
-                                            ? stage.name + "/" + job.job_id + "/"
-                                            : "<run_dir>/" + stage.name + "/" + job.job_id + "/";
+                                            ? "stages/" + stage.name + "/" + job.job_id + "/"
+                                            : "<run_dir>/stages/" + stage.name + "/" + job.job_id + "/";
                 std::cout << "  - [" << job.job_id << "] " << job.name << "\n"
                           << "      Backend: " << bname << "\n"
-                          << "      Command: " << interp_cmd << "\n"
-                          << "      Status:  " << (job_enabled ? "QUEUED" : "SKIPPED") << "\n"
+                          << "      Command: " << interp_cmd << "\n";
+                if (!job.working_dir.empty()) {
+                    std::cout << "      WorkDir: " << job.working_dir << "\n";
+                }
+                if (job.timeout_sec > 0) {
+                    std::cout << "      Timeout: " << job.timeout_sec << "s\n";
+                }
+                std::cout << "      Status:  " << (job_enabled ? "QUEUED" : "SKIPPED") << "\n"
                           << "      Path:    " << job_path_str << "\n";
             }
         }

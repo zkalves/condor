@@ -163,6 +163,7 @@ private:
     mutable std::mutex mutex_;
     std::unique_ptr<ProgressDisplay> progress_;
     std::chrono::steady_clock::time_point pipeline_start_time_;
+    std::chrono::steady_clock::time_point last_grid_poll_time_;
 };
 
 } // namespace condor

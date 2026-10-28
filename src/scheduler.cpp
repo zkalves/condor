@@ -22,6 +22,7 @@
 #include "condor/menu.hpp"
 #include "condor/logging.hpp"
 #include "condor/html_report.hpp"
+#include <yaml-cpp/yaml.h>
 #include <iostream>
 #include <iomanip>
 #include <thread>
@@ -32,6 +33,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <cstring>
+#include <fstream>
 
 namespace condor {
 
@@ -91,10 +93,19 @@ void Scheduler::init_runtime_states() {
             JobRuntimeState job_state;
             job_state.config = job_cfg;
 
-            // Determine backend (configured at settings.backend or overridden via CLI)
-            std::string bname = !config_.settings.backend_override.empty()
-                                ? config_.settings.backend_override
-                                : (!config_.settings.backend.empty() ? config_.settings.backend : config_.settings.default_backend);
+            // Determine backend (job-level -> stage-level -> settings backend -> default)
+            std::string bname;
+            if (!config_.settings.backend_override.empty()) {
+                bname = config_.settings.backend_override;
+            } else if (!job_cfg.backend.empty()) {
+                bname = job_cfg.backend;
+            } else if (!stage_cfg.backend.empty()) {
+                bname = stage_cfg.backend;
+            } else if (!config_.settings.backend.empty()) {
+                bname = config_.settings.backend;
+            } else {
+                bname = "local";
+            }
             if (bname.empty()) {
                 bname = "local";
             }
@@ -114,8 +125,45 @@ void Scheduler::init_runtime_states() {
                 job_state.backend = backends_["local"].get();
             }
 
+            StageExecutionMode smode = stage_cfg.mode;
+            auto mode_it = config_.settings.stage_modes.find(stage_cfg.name);
+            if (mode_it != config_.settings.stage_modes.end()) {
+                smode = mode_it->second;
+            }
+
             if (!stage_enabled) {
                 job_state.status = JobStatus::SKIPPED;
+            } else if (!config_.settings.rerun_base_dir.empty()) {
+                // Rerun mode
+                if (smode == StageExecutionMode::CACHED) {
+                    job_state.status = JobStatus::PASSED;
+                    CONDOR_LOG_DEBUG("Job '" + job_cfg.job_id + "' marked cached from base run.");
+                } else if (smode == StageExecutionMode::FAILED_ONLY) {
+                    std::filesystem::path prev_status = std::filesystem::path(config_.settings.rerun_base_dir) / "stages" / stage_cfg.name / job_cfg.job_id / "job_status.yaml";
+                    bool prev_passed = false;
+                    if (std::filesystem::exists(prev_status)) {
+                        try {
+                            YAML::Node s_node = YAML::LoadFile(prev_status.string());
+                            if (s_node["status"]) {
+                                std::string st = s_node["status"].as<std::string>();
+                                if (st == "PASSED" || st == "FAILED (ALLOWED)" || st == "SKIPPED") {
+                                    prev_passed = true;
+                                }
+                            }
+                        } catch (...) {}
+                    }
+                    if (prev_passed) {
+                        job_state.status = JobStatus::PASSED;
+                        CONDOR_LOG_DEBUG("Job '" + job_cfg.job_id + "' passed in base run; marked cached.");
+                    } else {
+                        job_state.status = JobStatus::QUEUED;
+                        workspace_.create_job_dir(stage_cfg.name, job_cfg.job_id);
+                    }
+                } else {
+                    // FULL mode: re-run all jobs in stage
+                    job_state.status = JobStatus::QUEUED;
+                    workspace_.create_job_dir(stage_cfg.name, job_cfg.job_id);
+                }
             } else {
                 // Evaluate job enabled_if
                 bool job_enabled = ExpressionEvaluator::evaluate(job_cfg.enabled_if, config_.variables);
@@ -229,7 +277,7 @@ int Scheduler::execute_hook(const HookConfig& hook, bool is_pre,
     } else if (!stage_name.empty()) {
         hook_dir = workspace_.stage_dir(stage_name);
     } else {
-        hook_dir = workspace_.run_dir();
+        hook_dir = workspace_.pipeline_dir();
     }
     std::error_code dir_ec;
     std::filesystem::create_directories(hook_dir, dir_ec);
@@ -497,9 +545,13 @@ void Scheduler::dispatch_ready_jobs() {
                 job_vars.set("TEST_DIR", ctx->test_dir);
                 job_vars.set("CONDOR_TEST_DIR", ctx->test_dir);
 
-                // Inject job-specific variables (e.g. SEED, INDEX)
+                // Inject job-specific variables (e.g. INDEX)
                 for (const auto& [k, v] : job.config.variables) {
                     job_vars.set(k, v);
+                }
+
+                if (!job.config.working_dir.empty()) {
+                    ctx->working_dir = job_vars.interpolate(job.config.working_dir);
                 }
 
                 ctx->command = job_vars.interpolate(job.config.command);
@@ -527,12 +579,72 @@ void Scheduler::dispatch_ready_jobs() {
 }
 
 void Scheduler::poll_running_jobs() {
+    auto now = std::chrono::steady_clock::now();
+    int grid_interval = (config_.settings.grid_poll_interval_sec > 0) ? config_.settings.grid_poll_interval_sec : 10;
+    bool can_poll_grid = (std::chrono::duration<double>(now - last_grid_poll_time_).count() >= grid_interval);
+    bool did_poll_grid = false;
+
     for (auto& [jid, job] : jobs_) {
         if (job.status == JobStatus::RUNNING && job.exec_ctx) {
+            // Check timeout enforcement
+            double elapsed = std::chrono::duration<double>(now - job.exec_ctx->start_time).count();
+            if (job.config.timeout_sec > 0 && elapsed >= job.config.timeout_sec) {
+                CONDOR_LOG_WARN("Job " + jid + " (" + job.config.name + ") timed out after " +
+                                std::to_string(job.config.timeout_sec) + "s! Terminating...");
+                job.backend->cancel(*job.exec_ctx);
+                job.status = JobStatus::TIMEOUT;
+                job.exit_code = 124;
+                job.elapsed_sec = elapsed;
+
+                const auto* s = config_.find_stage(job.config.stage_name);
+                bool allow = job.config.allow_failure || (s && s->allow_failure);
+                if (allow) {
+                    job.status = JobStatus::FAILED_ALLOWED;
+                } else {
+                    FailureAction action = config_.settings.on_failure_action;
+                    if (action == FailureAction::ABORT) {
+                        CONDOR_LOG_ERROR("Job " + jid + " timed out! Triggering ABORT policy...");
+                        abort_all();
+                    } else if (action == FailureAction::STAGE_BARRIER) {
+                        CONDOR_LOG_WARN("Job " + jid + " timed out! Triggering STAGE_BARRIER policy...");
+                        stage_barrier_triggered_ = true;
+                    } else if (action == FailureAction::CONTINUE) {
+                        CONDOR_LOG_WARN("Job " + jid + " timed out! Continuing independent branches...");
+                    }
+                }
+
+                JobMetadata meta;
+                meta.job_id = job.config.job_id;
+                meta.job_name = job.config.name;
+                meta.stage_name = job.config.stage_name;
+                meta.pid_or_grid_id = job.pid_or_grid_id;
+                meta.status = job.status;
+                meta.exit_code = job.exit_code;
+                meta.elapsed_sec = job.elapsed_sec;
+                if (config_.settings.path_style == PathStyle::RELATIVE) {
+                    meta.working_directory = ".";
+                } else {
+                    meta.working_directory = workspace_.job_dir(job.config.stage_name, job.config.job_id).string();
+                }
+                workspace_.write_job_status(job.config.stage_name, meta);
+
+                sync_stage_manifest(job.config.stage_name);
+                progress_->on_job_finished(job.config.stage_name, job.config.job_id, job.config.name,
+                                           job.status, job.exit_code, job.elapsed_sec);
+                continue;
+            }
+
+            // Grid polling throttling
+            if (job.backend->type() == BackendType::TEMPLATE && !can_poll_grid) {
+                continue;
+            }
+            if (job.backend->type() == BackendType::TEMPLATE) {
+                did_poll_grid = true;
+            }
+
             auto poll_res = job.backend->poll(*job.exec_ctx);
             if (poll_res.finished) {
                 job.exit_code = poll_res.exit_code;
-                auto now = std::chrono::steady_clock::now();
                 job.elapsed_sec = std::chrono::duration<double>(now - job.exec_ctx->start_time).count();
 
                 if (poll_res.status == JobStatus::PASSED) {
@@ -585,6 +697,10 @@ void Scheduler::poll_running_jobs() {
         }
     }
 
+    if (did_poll_grid) {
+        last_grid_poll_time_ = now;
+    }
+
     // Check if stages have finished
     for (auto& stage : stages_) {
         if (stage.status == JobStatus::RUNNING) {
@@ -596,7 +712,7 @@ void Scheduler::poll_running_jobs() {
                     all_done = false;
                     break;
                 }
-                if (j.status == JobStatus::FAILED) {
+                if (j.status == JobStatus::FAILED || j.status == JobStatus::ABORTED || j.status == JobStatus::TIMEOUT) {
                     any_failed = true;
                 }
             }
@@ -625,6 +741,7 @@ ProgressStats Scheduler::compute_progress_stats() const {
             case JobStatus::FAILED_ALLOWED: stats.passed_jobs++; break; // Counts toward completed/allowed
             case JobStatus::SKIPPED:        stats.skipped_jobs++; break;
             case JobStatus::ABORTED:        stats.failed_jobs++; break;
+            case JobStatus::TIMEOUT:        stats.failed_jobs++; break;
         }
     }
 
@@ -647,7 +764,8 @@ std::vector<StageSummaryInfo> Scheduler::compute_stage_summaries() const {
                     case JobStatus::FAILED_ALLOWED: sinfo.passed++; break;
                     case JobStatus::RUNNING:        sinfo.running++; break;
                     case JobStatus::FAILED:
-                    case JobStatus::ABORTED:        sinfo.failed++; break;
+                    case JobStatus::ABORTED:
+                    case JobStatus::TIMEOUT:        sinfo.failed++; break;
                     case JobStatus::SKIPPED:        sinfo.skipped++; break;
                     default: break;
                 }
@@ -835,8 +953,30 @@ bool Scheduler::run() {
     }
 
     // Generate tool-agnostic HTML report (includes all stage and job hook logs)
-    std::filesystem::path report_html_path = workspace_.run_dir() / "report.html";
+    std::filesystem::path report_html_path = workspace_.artifacts_dir() / "report.html";
     HtmlReportGenerator::write_report(report_html_path, config_, workspace_, stages_, jobs_, final_stats, pipeline_success);
+
+    if (config_.settings.emit_junit_xml) {
+        std::filesystem::path junit_path = !config_.settings.junit_xml_path.empty()
+            ? std::filesystem::path(config_.settings.junit_xml_path)
+            : (workspace_.artifacts_dir() / "junit_report.xml");
+        HtmlReportGenerator::write_junit_xml(junit_path, config_, stages_, jobs_, final_stats, pipeline_success);
+    }
+
+    // Write internal pipeline operational summary into pipeline/
+    {
+        std::ofstream sum_out(workspace_.pipeline_dir() / "pipeline_summary.yaml", std::ios::trunc);
+        if (sum_out) {
+            sum_out << "pipeline: \"" << config_.name << "\"\n"
+                    << "status: \"" << (pipeline_success ? "PASSED" : "FAILED") << "\"\n"
+                    << "total_jobs: " << final_stats.total_jobs << "\n"
+                    << "passed_jobs: " << final_stats.passed_jobs << "\n"
+                    << "failed_jobs: " << final_stats.failed_jobs << "\n"
+                    << "skipped_jobs: " << final_stats.skipped_jobs << "\n"
+                    << std::fixed << std::setprecision(3)
+                    << "elapsed_sec: " << final_stats.elapsed_sec << "\n";
+        }
+    }
 
     progress_->print_final_summary(final_stats, pipeline_success, report_html_path.string());
 

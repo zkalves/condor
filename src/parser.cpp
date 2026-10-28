@@ -108,8 +108,11 @@ static void parse_job_deps(const YAML::Node& jnode, JobConfig& job) {
 static JobDefaults parse_defaults_node(const YAML::Node& node) {
     JobDefaults defs;
     if (!node || !node.IsMap()) return defs;
-    if (node["backend"]) {
-        throw ConfigurationError("Configuration error: 'backend' cannot be configured in defaults. The execution backend is a pipeline configuration defined under 'settings.backend'.");
+    if (node["backend"]) defs.backend = node["backend"].as<std::string>();
+    if (node["working_dir"]) defs.working_dir = node["working_dir"].as<std::string>();
+    if (node["timeout"]) {
+        defs.timeout = node["timeout"].as<std::string>();
+        defs.timeout_sec = parse_timeout_seconds(defs.timeout);
     }
     if (node["command"]) defs.command = node["command"].as<std::string>();
     if (node["args"])    defs.args    = node["args"].as<std::string>();
@@ -128,6 +131,12 @@ static JobDefaults parse_defaults_node(const YAML::Node& node) {
 
 static void merge_defaults(JobDefaults& target, const JobDefaults& override_defs) {
     if (!override_defs.command.empty()) target.command = override_defs.command;
+    if (!override_defs.backend.empty()) target.backend = override_defs.backend;
+    if (!override_defs.working_dir.empty()) target.working_dir = override_defs.working_dir;
+    if (!override_defs.timeout.empty()) {
+        target.timeout = override_defs.timeout;
+        target.timeout_sec = override_defs.timeout_sec;
+    }
 
     bool should_append = override_defs.append_args.has_value()
         ? *override_defs.append_args
@@ -175,11 +184,16 @@ static std::string sanitize_identifier(const std::string& input) {
 
 static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& job_counter, const JobDefaults& defaults, size_t count_multiplier) {
     std::string base_name = jnode["name"] ? jnode["name"].as<std::string>() : "job";
-    if (jnode["backend"]) {
-        throw ConfigurationError("Configuration error: 'backend' cannot be configured per job ('" + base_name + "'). The execution backend is a pipeline configuration defined under 'settings.backend'.");
-    }
-    if (jnode["seed"] || jnode["seeds"]) {
-        throw ConfigurationError("Configuration error: 'seed' and 'seeds' have been removed. Use 'variables: { SEED: <val> }' for explicit seeds, 'matrix: { SEED: [<val1>, <val2>] }' for seed parameter sweeps, or 'count: N' for replicated runs.");
+    std::string backend = jnode["backend"] ? jnode["backend"].as<std::string>() : defaults.backend;
+    std::string working_dir = jnode["working_dir"] ? jnode["working_dir"].as<std::string>() : defaults.working_dir;
+    std::string timeout;
+    int timeout_sec = 0;
+    if (jnode["timeout"]) {
+        timeout = jnode["timeout"].as<std::string>();
+        timeout_sec = parse_timeout_seconds(timeout);
+    } else {
+        timeout = defaults.timeout;
+        timeout_sec = defaults.timeout_sec;
     }
     std::string command = jnode["command"] ? jnode["command"].as<std::string>() : defaults.command;
     std::string enabled_if = jnode["enabled_if"] ? jnode["enabled_if"].as<std::string>() : "";
@@ -289,6 +303,10 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
             job.append_args = job_append_args;
         }
         job.scalable = is_scalable;
+        job.backend = backend;
+        job.working_dir = working_dir;
+        job.timeout = timeout;
+        job.timeout_sec = timeout_sec;
 
         // Auto-append arguments to command if command does not contain ${ARGS}
         if (!final_args.empty() && job.command.find("${ARGS}") == std::string::npos) {
@@ -382,7 +400,6 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
             job.count = effective_count;
             apply_job_defaults(job);
             job.variables["INDEX"] = std::to_string(i);
-            job.variables["SEED"] = std::to_string(i + 1);
             stage.jobs.push_back(job);
         }
     } else {
@@ -514,13 +531,21 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         }
         if (s["backend"]) {
             config.settings.backend = s["backend"].as<std::string>();
-            config.settings.default_backend = config.settings.backend;
         }
         if (s["output_mode"]) {
             config.settings.output_mode = parse_output_mode(s["output_mode"].as<std::string>());
         }
         if (s["path_style"]) {
             config.settings.path_style = parse_path_style(s["path_style"].as<std::string>());
+        }
+        if (s["grid_poll_interval_sec"]) {
+            config.settings.grid_poll_interval_sec = s["grid_poll_interval_sec"].as<int>();
+        }
+        if (s["emit_junit_xml"]) {
+            config.settings.emit_junit_xml = s["emit_junit_xml"].as<bool>();
+        }
+        if (s["junit_xml_path"]) {
+            config.settings.junit_xml_path = s["junit_xml_path"].as<std::string>();
         }
         if (s["count_multiplier"]) {
             config.settings.count_multiplier = s["count_multiplier"].as<size_t>();
@@ -620,7 +645,13 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         }
 
         if (snode["backend"]) {
-            throw ConfigurationError("Configuration error: 'backend' cannot be configured per stage ('" + stage.name + "'). The execution backend is a pipeline configuration defined under 'settings.backend'.");
+            stage.backend = snode["backend"].as<std::string>();
+            if (stage.defaults.backend.empty()) {
+                stage.defaults.backend = stage.backend;
+            }
+        }
+        if (snode["mode"]) {
+            stage.mode = parse_stage_execution_mode(snode["mode"].as<std::string>());
         }
         if (snode["enabled_if"]) stage.enabled_if = snode["enabled_if"].as<std::string>();
         if (snode["allow_failure"]) stage.allow_failure = snode["allow_failure"].as<bool>();
@@ -827,6 +858,102 @@ void YamlParser::check_dag_cycles(const PipelineConfig& config) {
     for (const auto& stage : config.stages) {
         if (state[stage.name] == NodeState::UNVISITED) {
             dfs(dfs, stage.name, path);
+        }
+    }
+
+    // 2. Job-level dependency cycle detection
+    std::unordered_map<std::string, std::vector<std::string>> job_adj;
+    std::unordered_set<std::string> all_job_keys;
+
+    for (const auto& stage : config.stages) {
+        for (const auto& job : stage.jobs) {
+            std::string jkey = stage.name + "/" + job.job_id;
+            all_job_keys.insert(jkey);
+            job_adj[jkey] = {};
+        }
+    }
+
+    for (const auto& stage : config.stages) {
+        for (const auto& job : stage.jobs) {
+            std::string jkey = stage.name + "/" + job.job_id;
+
+            // Inherit stage-level dependencies
+            for (const auto& sdep : stage.depends_on) {
+                const StageConfig* dep_s = config.find_stage(sdep);
+                if (dep_s) {
+                    for (const auto& dj : dep_s->jobs) {
+                        job_adj[jkey].push_back(dep_s->name + "/" + dj.job_id);
+                    }
+                }
+            }
+
+            // Direct job-level dependencies
+            for (const auto& dep : job.depends_on) {
+                // 1. stage/job_id
+                if (all_job_keys.count(dep)) {
+                    job_adj[jkey].push_back(dep);
+                    continue;
+                }
+                // 2. job_id in same stage
+                std::string same_stage_id = stage.name + "/" + dep;
+                if (all_job_keys.count(same_stage_id)) {
+                    job_adj[jkey].push_back(same_stage_id);
+                    continue;
+                }
+                // 3. Stage name dependency
+                const StageConfig* dep_s = config.find_stage(dep);
+                if (dep_s) {
+                    for (const auto& dj : dep_s->jobs) {
+                        job_adj[jkey].push_back(dep_s->name + "/" + dj.job_id);
+                    }
+                    continue;
+                }
+                // 4. Job name match within same stage or across stages
+                for (const auto& ostg : config.stages) {
+                    for (const auto& oj : ostg.jobs) {
+                        if (oj.name == dep || (oj.job_id == dep && ostg.name == stage.name)) {
+                            job_adj[jkey].push_back(ostg.name + "/" + oj.job_id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    std::unordered_map<std::string, NodeState> job_states;
+    for (const auto& k : all_job_keys) {
+        job_states[k] = NodeState::UNVISITED;
+    }
+
+    auto job_dfs = [&](const auto& self, const std::string& node, std::vector<std::string>& jpath) -> void {
+        job_states[node] = NodeState::VISITING;
+        jpath.push_back(node);
+
+        auto it = job_adj.find(node);
+        if (it != job_adj.end()) {
+            for (const auto& dep : it->second) {
+                if (!all_job_keys.count(dep)) continue;
+                if (job_states[dep] == NodeState::VISITING) {
+                    std::string cycle_str;
+                    for (const auto& p : jpath) {
+                        cycle_str += p + " -> ";
+                    }
+                    cycle_str += dep;
+                    throw ConfigurationError("Configuration error: Cycle detected in job dependencies: " + cycle_str);
+                } else if (job_states[dep] == NodeState::UNVISITED) {
+                    self(self, dep, jpath);
+                }
+            }
+        }
+
+        jpath.pop_back();
+        job_states[node] = NodeState::VISITED;
+    };
+
+    std::vector<std::string> jpath;
+    for (const auto& k : all_job_keys) {
+        if (job_states[k] == NodeState::UNVISITED) {
+            job_dfs(job_dfs, k, jpath);
         }
     }
 }

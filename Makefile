@@ -44,14 +44,14 @@ help: ## Show this help message with all available targets
 	@echo "  build-offline        Build using local third_party/ (offline flow, zero network)"
 	@echo "  build-custom         Build using FetchContent/system packages (custom/online flow)"
 	@echo "  download-deps        Fetch dependencies into third_party/ for offline development"
-	@echo "  all                  Alias for build"
+	@echo "  all                  Build Condor executable"
 	@echo ""
 	@echo "Test Flows:"
 	@echo "  test                 Run test suite via CTest"
 	@echo "  test-verbose         Run tests directly with full individual test output"
 	@echo ""
 	@echo "Documentation Flows:"
-	@echo "  docs                 Generate HTML documentation portal (alias for docs-doxygen)"
+	@echo "  docs                 Generate HTML documentation portal"
 	@echo "  docs-doxygen         Generate Doxygen C++ API & Markdown documentation portal (_site/)"
 	@echo "  docs-serve           Serve documentation portal on http://127.0.0.1:8000"
 	@echo ""
@@ -60,7 +60,7 @@ help: ## Show this help message with all available targets
 	@echo "  run-simple           Run basic build/test/package pipeline (examples/simple/scripts/pipeline.yaml)"
 	@echo "  run-conditional      Run conditional pipeline with default vars (coverage=0, fast_mode=1)"
 	@echo "  run-coverage         Run conditional pipeline with coverage enabled (--define-variable coverage=1)"
-	@echo "  run-matrix           Run matrix replication, seeds parameter sweep, and includes pipeline"
+	@echo "  run-matrix           Run matrix replication, parameter sweeps, and includes pipeline"
 	@echo "  run-failures         Run error handling, failure policies, and always-run hooks pipeline"
 	@echo "  run-backends         Run custom template grid backend pipeline (Slurm/SGE simulation)"
 	@echo "  run-verilator        Run Verilator ALU build & tests WITHOUT coverage"
@@ -90,7 +90,7 @@ help: ## Show this help message with all available targets
 # ------------------------------------------------------------------------------
 # Build Flows
 # ------------------------------------------------------------------------------
-all: build ## Alias for build
+all: build ## Build Condor executable
 
 build: ## Build Condor (auto-detects local third_party, system packages, or FetchContent)
 	@echo "==> Building Condor..."
@@ -169,7 +169,7 @@ run-coverage: $(CONDOR_BIN) ## Run conditional pipeline with coverage enabled (c
 	@echo "==> Executing examples/conditional/scripts/pipeline.yaml with coverage=1..."
 	@$(CONDOR_BIN) examples/conditional/scripts/pipeline.yaml --define-variable coverage=1
 
-run-matrix: $(CONDOR_BIN) ## Run matrix replication, seeds sweep, and includes pipeline
+run-matrix: $(CONDOR_BIN) ## Run matrix replication, parameter sweeps, and includes pipeline
 	@echo "==> Executing examples/matrix_and_includes/scripts/pipeline.yaml..."
 	@$(CONDOR_BIN) examples/matrix_and_includes/scripts/pipeline.yaml
 
@@ -196,7 +196,7 @@ run-ci: $(CONDOR_BIN) ## Run pipeline in non-interactive CI mode with periodic s
 # ------------------------------------------------------------------------------
 # Documentation Flows
 # ------------------------------------------------------------------------------
-docs: docs-doxygen ## Generate HTML documentation portal (alias for docs-doxygen)
+docs: docs-doxygen ## Generate HTML documentation portal
 
 docs-doxygen: ## Generate Doxygen C++ API & Markdown documentation portal (_site/)
 	@if command -v doxygen >/dev/null 2>&1; then \

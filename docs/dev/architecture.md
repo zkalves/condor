@@ -113,7 +113,7 @@ The central execution engine:
 
 ### Subsystem 2: Configuration & AST Parser (include/condor/parser.hpp, src/parser.cpp)
 Responsible for reading, expanding, and validating pipeline definitions:
-- **`YamlParser`**: Parses pipeline YAML files using `yaml-cpp`. Expands test matrices (`count: N`), expands multi-seed sweeps (`seeds: [...]`), applies hierarchical two-tier defaults (`defaults:`), and merges external modular files (`include:`).
+- **`YamlParser`**: Parses pipeline YAML files using `yaml-cpp`. Expands test matrices (`matrix: {...}`), test replication (`count: N`), applies hierarchical defaults (`defaults:`), and merges external modular files (`include:`).
 - **Validation & DAG Cycle Detection**: Verifies that all stage and variable names conform to POSIX identifier rules (`^[a-zA-Z0-9_-]+$`). Runs depth-first search (DFS) with a recursion stack to detect cyclic stage dependencies before execution starts.
 - **`ExpressionEvaluator` (`src/expression.cpp`)**: Recursive-descent expression evaluator for `enabled_if` conditions. Evaluates equality, inequalities (`<`, `<=`, `>`, `>=`), negation (`!`), and boolean logic (`&&`, `||`).
 
@@ -121,7 +121,7 @@ Responsible for reading, expanding, and validating pipeline definitions:
 - **`VariableManager`**: Thread-safe storage for user-defined and built-in variables. Provides fast `${VAR}` and `$VAR` string interpolation with fallback defaults (`${VAR:-default}`). Exports variables formatted as environment pairs (`CONDOR_VAR_<UPPER_KEY>=<VAL>`).
 
 ### Subsystem 4: Filesystem & Workspace Engine (include/condor/workspace.hpp, src/workspace.cpp)
-- **`WorkspaceManager`**: Manages timestamped run folders (`YYYYMMDD_HHMMSS_<rand>`) in `condor_runs/` or explicit `--run-dir` directories. Maintains an atomic symlink `condor_runs/latest` via temp symlink swapping (`rename`). Writes human-readable `stage_manifest.txt`, legacy `job_status.txt`, and structured `job_status.yaml` records.
+- **`WorkspaceManager`**: Manages timestamped run folders (`YYYYMMDD_HHMMSS_<rand>`) in `condor_runs/` or explicit `--run-dir` directories, enforcing a clean directory layout (`artifacts/` for HTML/JUnit reports, `pipeline/` for operational logs and summaries, and `stages/` for workload execution). Maintains an atomic symlink `condor_runs/latest` via temp symlink swapping (`rename`). Writes human-readable `stage_manifest.txt`, plain-text `job_status.txt`, and structured `job_status.yaml` records.
 
 ### Subsystem 5: Execution Backends (include/condor/backend.hpp, src/backend.cpp)
 - **`ExecutionBackend`**: Abstract interface defining `submit`, `poll`, and `cancel`.
@@ -131,4 +131,4 @@ Responsible for reading, expanding, and validating pipeline definitions:
 
 ### Subsystem 6: Progress & Interactive Reporting (src/progress.cpp, src/html_report.cpp)
 - **`ProgressDisplay`**: Queries terminal column dimensions dynamically via `ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws)`. Renders multi-track progress bars with ANSI color escapes. Supports non-interactive periodic CI logging and output filtering (`all`, `failures`, `summary`).
-- **`HtmlReportGenerator`**: Compiles the zero-dependency interactive `report.html` report with embedded CSS, JavaScript, stage navigation bars, custom machine metrics extraction, and embedded log viewers.
+- **`HtmlReportGenerator`**: Compiles the zero-dependency interactive `artifacts/report.html` report with embedded CSS, JavaScript, stage navigation bars, custom machine metrics extraction, and embedded log viewers.

@@ -32,7 +32,7 @@ flowchart TD
     PGID --> RUNNER["job_runner.sh\n(Direct Execution)"]
     
     SCHED --> REPORT["HtmlReportGenerator\n(src/html_report.cpp)"]
-    REPORT --> HTML["report.html\n(Zero-Dependency Interactive Report)"]
+    REPORT --> HTML["artifacts/report.html\n(Zero-Dependency Interactive Report)"]
 ```
 
 ---
@@ -102,12 +102,12 @@ Rather than executing opaque shell strings or dynamic string `eval`, Condor writ
 # Job Name:      arithmetic
 #
 # Reproduce this job standalone:
-#   cd "/path/to/condor_runs/.../sim_tests/0001"
+#   cd "/path/to/condor_runs/.../stages/sim_tests/0001"
 #   ./job_runner.sh
 # ==============================================================================
 set -o pipefail
 
-export CONDOR_RUN_DIR="../.."
+export CONDOR_RUN_DIR="../../.."
 export CONDOR_STAGE_DIR=".."
 export CONDOR_JOB_DIR="."
 export BUILD_DIR="../../build_rtl/0001"

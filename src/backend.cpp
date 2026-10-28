@@ -36,7 +36,7 @@
 namespace condor {
 
 std::string LocalBackend::generate_runner_script(const JobExecutionContext& ctx) {
-    const std::string& target_cd = ctx.physical_job_dir.empty() ? ctx.job_dir : ctx.physical_job_dir;
+    const std::string& target_cd = !ctx.working_dir.empty() ? ctx.working_dir : (ctx.physical_job_dir.empty() ? ctx.job_dir : ctx.physical_job_dir);
     std::ostringstream ss;
     ss << "#!/usr/bin/env bash\n"
        << "# ==============================================================================\n"
@@ -45,8 +45,11 @@ std::string LocalBackend::generate_runner_script(const JobExecutionContext& ctx)
        << "# Job ID:        " << ctx.job_id << "\n"
        << "# Job Name:      " << ctx.job_name << "\n"
        << "# Run Directory: " << ctx.run_dir << "\n"
-       << "# Job Directory: " << ctx.job_dir << "\n"
-       << "#\n"
+       << "# Job Directory: " << ctx.job_dir << "\n";
+    if (!ctx.working_dir.empty()) {
+        ss << "# Working Dir:   " << ctx.working_dir << "\n";
+    }
+    ss << "#\n"
        << "# Reproduce this job standalone:\n"
        << "#   cd \"" << target_cd << "\"\n"
        << "#   ./job_runner.sh\n"
@@ -60,6 +63,10 @@ std::string LocalBackend::generate_runner_script(const JobExecutionContext& ctx)
        << "export CONDOR_JOB_NAME=\"" << ctx.job_name << "\"\n"
        << "export CONDOR_JOB_DIR=\"" << ctx.job_dir << "\"\n"
        << "export CONDOR_OUTPUT_MODE=\"" << ctx.output_mode << "\"\n";
+
+    if (!ctx.working_dir.empty()) {
+        ss << "export CONDOR_WORKING_DIR=\"" << ctx.working_dir << "\"\n";
+    }
 
     if (!ctx.build_dir.empty()) {
         ss << "export BUILD_DIR=\"" << ctx.build_dir << "\"\n"
@@ -75,8 +82,8 @@ std::string LocalBackend::generate_runner_script(const JobExecutionContext& ctx)
         ss << "export " << k << "=\"" << v << "\"\n";
     }
 
-    ss << "\n# Navigate to Job Directory\n"
-       << "cd \"$CONDOR_JOB_DIR\" || exit 1\n\n";
+    ss << "\n# Navigate to Target Execution Directory\n"
+       << "cd \"" << target_cd << "\" || exit 1\n\n";
 
     if (!ctx.pre_hook.empty()) {
         ss << "# --- Pre-Hook ---\n"
@@ -166,9 +173,10 @@ void LocalBackend::submit(JobExecutionContext& ctx) {
         // Set new process group ID so child + descendants can be killed cleanly
         setpgid(0, 0);
 
-        // Chdir into pdir
-        if (chdir(pdir.c_str()) != 0) {
-            std::cerr << "Child failed to chdir to " << pdir << ": " << std::strerror(errno) << std::endl;
+        // Chdir into target execution directory (working_dir or pdir)
+        const std::string& work_dir = !ctx.working_dir.empty() ? ctx.working_dir : pdir;
+        if (chdir(work_dir.c_str()) != 0) {
+            std::cerr << "Child failed to chdir to " << work_dir << ": " << std::strerror(errno) << std::endl;
             _exit(1);
         }
 
@@ -196,6 +204,9 @@ void LocalBackend::submit(JobExecutionContext& ctx) {
         setenv("CONDOR_JOB_NAME", ctx.job_name.c_str(), 1);
         setenv("CONDOR_JOB_DIR", ctx.job_dir.c_str(), 1);
         setenv("CONDOR_OUTPUT_MODE", ctx.output_mode.c_str(), 1);
+        if (!ctx.working_dir.empty()) {
+            setenv("CONDOR_WORKING_DIR", ctx.working_dir.c_str(), 1);
+        }
         if (!ctx.build_dir.empty()) {
             setenv("BUILD_DIR", ctx.build_dir.c_str(), 1);
             setenv("CONDOR_BUILD_DIR", ctx.build_dir.c_str(), 1);
@@ -310,6 +321,7 @@ std::string TemplateBackend::substitute(std::string_view template_str, const Job
     replace_all("{job_id}", ctx.job_id);
     replace_all("{job_name}", ctx.job_name);
     replace_all("{job_dir}", ctx.job_dir);
+    replace_all("{working_dir}", !ctx.working_dir.empty() ? ctx.working_dir : ctx.job_dir);
     replace_all("{stage_dir}", ctx.stage_dir);
     replace_all("{run_dir}", ctx.run_dir);
     replace_all("{script}", pdir + "/job_runner.sh");

@@ -3,15 +3,15 @@
 For every pipeline run, Condor automatically compiles a zero-dependency, self-contained interactive HTML report located at:
 
 ```text
-<run_dir>/report.html
+<run_dir>/artifacts/report.html
 ```
 
 When timestamped run directories are generated in `./condor_runs/`, Condor automatically maintains an atomic symlink `./condor_runs/latest` pointing to the most recent run, allowing you to access the latest report via:
 
 ```bash
-xdg-open ./condor_runs/latest/report.html
+xdg-open ./condor_runs/latest/artifacts/report.html
 # Or on macOS:
-open ./condor_runs/latest/report.html
+open ./condor_runs/latest/artifacts/report.html
 ```
 
 ---

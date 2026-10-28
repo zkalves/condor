@@ -30,7 +30,7 @@ namespace condor {
  * @class YamlParser
  * @brief Parses pipeline specifications from YAML files or strings into strongly-typed PipelineConfig models.
  *
- * Handles hierarchical defaults inheritance, matrix test replication, explicit seed parameter sweeps,
+ * Handles hierarchical defaults inheritance, matrix parameter sweeps, count replication,
  * recursive YAML file inclusion, and DAG dependency graph cycle validation via Tarjan's / Kahn's algorithms.
  */
 class YamlParser {

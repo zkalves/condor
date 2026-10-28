@@ -115,6 +115,19 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
           "type": "integer",
           "minimum": 1,
           "description": "Global multiplier for scalable job counts"
+        },
+        "grid_poll_interval_sec": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Polling interval in seconds for template/grid backends"
+        },
+        "emit_junit_xml": {
+          "type": "boolean",
+          "description": "Emit standard junit_report.xml upon completion"
+        },
+        "junit_xml_path": {
+          "type": "string",
+          "description": "Custom destination path for junit_report.xml"
         }
       },
       "additionalProperties": false
@@ -127,6 +140,9 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
         "args": { "type": "string" },
         "append_args": { "type": "boolean" },
         "scalable": { "type": "boolean" },
+        "backend": { "type": "string" },
+        "working_dir": { "type": "string" },
+        "timeout": { "type": ["string", "integer"] },
         "hooks": { "$ref": "#/definitions/HookConfig" },
         "variables": {
           "type": "object",
@@ -146,6 +162,9 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
             "args": { "type": "string" },
             "append_args": { "type": "boolean" },
             "scalable": { "type": "boolean" },
+            "backend": { "type": "string" },
+            "working_dir": { "type": "string" },
+            "timeout": { "type": ["string", "integer"] },
             "hooks": { "$ref": "#/definitions/HookConfig" },
             "variables": {
               "type": "object",
@@ -215,6 +234,11 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
           "pattern": "^[a-zA-Z0-9_-]+$",
           "description": "POSIX-safe identifier for stage name"
         },
+        "backend": { "type": "string" },
+        "mode": {
+          "type": "string",
+          "enum": ["full", "failed_only", "cached"]
+        },
         "enabled_if": { "type": "string" },
         "allow_failure": { "type": "boolean" },
         "depends_on": {
@@ -237,6 +261,9 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
             "args": { "type": "string" },
             "append_args": { "type": "boolean" },
             "scalable": { "type": "boolean" },
+            "backend": { "type": "string" },
+            "working_dir": { "type": "string" },
+            "timeout": { "type": ["string", "integer"] },
             "hooks": { "$ref": "#/definitions/HookConfig" },
             "variables": {
               "type": "object",
@@ -249,6 +276,9 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
                 "args": { "type": "string" },
                 "append_args": { "type": "boolean" },
                 "scalable": { "type": "boolean" },
+                "backend": { "type": "string" },
+                "working_dir": { "type": "string" },
+                "timeout": { "type": ["string", "integer"] },
                 "hooks": { "$ref": "#/definitions/HookConfig" },
                 "variables": {
                   "type": "object",
@@ -278,6 +308,9 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
           "type": "boolean",
           "description": "If false, job count is pinned and unaffected by count multipliers"
         },
+        "backend": { "type": "string" },
+        "working_dir": { "type": "string" },
+        "timeout": { "type": ["string", "integer"] },
         "enabled_if": { "type": "string" },
         "allow_failure": { "type": "boolean" },
         "depends_on": {

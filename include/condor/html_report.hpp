@@ -82,6 +82,25 @@ public:
         const ProgressStats& stats,
         bool success
     );
+
+    /**
+     * @brief Writes a standard JUnit/xUnit XML report to disk for CI/CD ingestion.
+     * @param output_path Target filesystem path for the XML file.
+     * @param config Pipeline configuration model.
+     * @param stages Vector of stage runtime states.
+     * @param jobs Map of job runtime states.
+     * @param stats Overall pipeline execution statistics.
+     * @param success Pipeline success flag.
+     * @return True if file was successfully written, false on I/O error.
+     */
+    static bool write_junit_xml(
+        const std::filesystem::path& output_path,
+        const PipelineConfig& config,
+        const std::vector<StageRuntimeState>& stages,
+        const std::unordered_map<std::string, JobRuntimeState>& jobs,
+        const ProgressStats& stats,
+        bool success
+    );
 };
 
 } // namespace condor

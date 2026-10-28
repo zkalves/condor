@@ -800,7 +800,33 @@ std::string HtmlReportGenerator::generate(
             <div class="stat-value">)HTML" << ProgressDisplay::format_duration(stats.elapsed_sec) << R"HTML(</div>
         </div>
     </div>
+)HTML";
 
+    std::string global_pre_txt = read_file_preview(workspace.pipeline_dir() / "pre_hook.log");
+    std::string global_post_txt = read_file_preview(workspace.pipeline_dir() / "post_hook.log");
+    if (!global_pre_txt.empty() || !global_post_txt.empty()) {
+        h << R"HTML(    <div style="margin-bottom: 24px; padding: 14px 18px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px;">
+        <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px; color: var(--text-heading);">&#9881; Pipeline Lifecycle Hooks</div>
+)HTML";
+        if (!global_pre_txt.empty()) {
+            h << R"HTML(        <details style="margin-bottom: 8px;">
+            <summary style="cursor: pointer; font-size: 12px; font-weight: 500; color: var(--accent); user-select: none;">&#9656; Pipeline Pre-Hook Output (pipeline/pre_hook.log)</summary>
+            <pre class="log-box" style="margin-top: 6px; max-height: 250px;">)HTML" << escape_html(global_pre_txt) << R"HTML(</pre>
+        </details>
+)HTML";
+        }
+        if (!global_post_txt.empty()) {
+            h << R"HTML(        <details>
+            <summary style="cursor: pointer; font-size: 12px; font-weight: 500; color: var(--accent); user-select: none;">&#9656; Pipeline Post-Hook Output (pipeline/post_hook.log)</summary>
+            <pre class="log-box" style="margin-top: 6px; max-height: 250px;">)HTML" << escape_html(global_post_txt) << R"HTML(</pre>
+        </details>
+)HTML";
+        }
+        h << R"HTML(    </div>
+)HTML";
+    }
+
+    h << R"HTML(
     <div class="stages-overview">
         <div class="section-title">Stage Progression</div>
         <div class="stage-bars">
@@ -816,7 +842,7 @@ std::string HtmlReportGenerator::generate(
             auto it = jobs.find(jid);
             if (it != jobs.end()) {
                 if (it->second.status == JobStatus::PASSED) stage_passed++;
-                else if (it->second.status == JobStatus::FAILED || it->second.status == JobStatus::ABORTED) stage_failed++;
+                else if (it->second.status == JobStatus::FAILED || it->second.status == JobStatus::ABORTED || it->second.status == JobStatus::TIMEOUT) stage_failed++;
                 else if (it->second.status == JobStatus::SKIPPED) stage_skipped++;
             }
         }
@@ -913,7 +939,7 @@ std::string HtmlReportGenerator::generate(
             if (it != jobs.end()) {
                 const auto& j = it->second;
                 if (j.status == JobStatus::PASSED) stage_passed++;
-                else if (j.status == JobStatus::FAILED || j.status == JobStatus::ABORTED) stage_failed++;
+                else if (j.status == JobStatus::FAILED || j.status == JobStatus::ABORTED || j.status == JobStatus::TIMEOUT) stage_failed++;
                 else if (j.status == JobStatus::SKIPPED) stage_skipped++;
                 stage_elapsed += j.elapsed_sec;
             }
@@ -1000,7 +1026,7 @@ std::string HtmlReportGenerator::generate(
             std::string st_str = to_string(job.status);
             std::string st_cls = "status-passed";
             std::string filter_tag = "passed";
-            if (job.status == JobStatus::FAILED || job.status == JobStatus::ABORTED) {
+            if (job.status == JobStatus::FAILED || job.status == JobStatus::ABORTED || job.status == JobStatus::TIMEOUT) {
                 st_cls = "status-failed";
                 filter_tag = "failed";
             } else if (job.status == JobStatus::SKIPPED) {
@@ -1044,7 +1070,7 @@ std::string HtmlReportGenerator::generate(
                 if (primary.find("://") != std::string::npos || primary.front() == '/') {
                     r_href = primary;
                 } else {
-                    r_href = (std::filesystem::path(job.config.stage_name) / job.config.job_id / primary).string();
+                    r_href = (std::filesystem::path("..") / "stages" / job.config.stage_name / job.config.job_id / primary).string();
                 }
                 h << R"HTML(                            <a href=")HTML" << escape_html(r_href)
                   << R"HTML(" target="_blank" class="job-report-link" onclick="event.stopPropagation();" title="Open Job HTML Report (")HTML"
@@ -1078,7 +1104,7 @@ std::string HtmlReportGenerator::generate(
                     if (rep.find("://") != std::string::npos || rep.front() == '/') {
                         r_href = rep;
                     } else {
-                        r_href = (std::filesystem::path(job.config.stage_name) / job.config.job_id / rep).string();
+                        r_href = (std::filesystem::path("..") / "stages" / job.config.stage_name / job.config.job_id / rep).string();
                     }
                     h << R"HTML(                                <a href=")HTML" << escape_html(r_href)
                       << R"HTML(" target="_blank" class="job-report-btn">&#128196; View )HTML"
@@ -1347,6 +1373,98 @@ bool HtmlReportGenerator::write_report(
         std::ofstream ofs(output_path, std::ios::trunc);
         if (!ofs) return false;
         ofs << html;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+static std::string escape_xml_attr(std::string_view str) {
+    std::string out;
+    out.reserve(str.size());
+    for (char c : str) {
+        switch (c) {
+            case '&':  out += "&amp;"; break;
+            case '<':  out += "&lt;"; break;
+            case '>':  out += "&gt;"; break;
+            case '"':  out += "&quot;"; break;
+            case '\'': out += "&apos;"; break;
+            default:   out += c; break;
+        }
+    }
+    return out;
+}
+
+bool HtmlReportGenerator::write_junit_xml(
+    const std::filesystem::path& output_path,
+    const PipelineConfig& config,
+    const std::vector<StageRuntimeState>& stages,
+    const std::unordered_map<std::string, JobRuntimeState>& jobs,
+    const ProgressStats& stats,
+    bool success
+) {
+    (void)success;
+    try {
+        std::ofstream ofs(output_path, std::ios::trunc);
+        if (!ofs) return false;
+
+        ofs << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+        ofs << "<testsuites name=\"" << escape_xml_attr(config.name) << "\" "
+            << "tests=\"" << stats.total_jobs << "\" "
+            << "failures=\"" << stats.failed_jobs << "\" "
+            << "skipped=\"" << stats.skipped_jobs << "\" "
+            << "time=\"" << std::fixed << std::setprecision(3) << stats.elapsed_sec << "\">\n";
+
+        for (const auto& stage : stages) {
+            size_t stage_tests = stage.job_ids.size();
+            size_t stage_fails = 0;
+            size_t stage_skips = 0;
+            double stage_time = 0.0;
+
+            for (const auto& jid : stage.job_ids) {
+                auto it = jobs.find(jid);
+                if (it != jobs.end()) {
+                    stage_time += it->second.elapsed_sec;
+                    if (it->second.status == JobStatus::FAILED || it->second.status == JobStatus::ABORTED || it->second.status == JobStatus::TIMEOUT) {
+                        stage_fails++;
+                    } else if (it->second.status == JobStatus::SKIPPED) {
+                        stage_skips++;
+                    }
+                }
+            }
+
+            ofs << "  <testsuite name=\"" << escape_xml_attr(stage.config.name) << "\" "
+                << "tests=\"" << stage_tests << "\" "
+                << "failures=\"" << stage_fails << "\" "
+                << "skipped=\"" << stage_skips << "\" "
+                << "time=\"" << std::fixed << std::setprecision(3) << stage_time << "\">\n";
+
+            for (const auto& jid : stage.job_ids) {
+                auto it = jobs.find(jid);
+                if (it == jobs.end()) continue;
+                const auto& job = it->second;
+
+                ofs << "    <testcase classname=\"" << escape_xml_attr(stage.config.name) << "\" "
+                    << "name=\"" << escape_xml_attr(job.config.name) << "\" "
+                    << "time=\"" << std::fixed << std::setprecision(3) << job.elapsed_sec << "\"";
+
+                if (job.status == JobStatus::PASSED || job.status == JobStatus::FAILED_ALLOWED) {
+                    ofs << "/>\n";
+                } else if (job.status == JobStatus::SKIPPED) {
+                    ofs << ">\n      <skipped/>\n    </testcase>\n";
+                } else {
+                    std::string msg = (job.status == JobStatus::TIMEOUT) ? "Execution timed out" : ("Exit code " + std::to_string(job.exit_code));
+                    std::string ftype = (job.status == JobStatus::TIMEOUT) ? "TIMEOUT" : "FAILURE";
+                    ofs << ">\n      <failure message=\"" << escape_xml_attr(msg) << "\" type=\"" << ftype << "\">"
+                        << "Job " << escape_xml_attr(job.config.job_id) << " (" << escape_xml_attr(job.config.name)
+                        << ") in stage '" << escape_xml_attr(stage.config.name) << "' terminated with status "
+                        << to_string(job.status) << " (exit code " << job.exit_code << ").\n"
+                        << "      </failure>\n    </testcase>\n";
+                }
+            }
+            ofs << "  </testsuite>\n";
+        }
+        ofs << "</testsuites>\n";
         return true;
     } catch (...) {
         return false;

@@ -10,7 +10,7 @@ Depending on your role and operational requirements, follow these recommended re
 
 - **🖥️ Hardware Verification & EDA Engineers**:
   1. [Getting Started](@ref getting_started) &mdash; Toolchain prerequisites, offline compilation, and quickstart.
-  2. [Pipeline YAML Specification](@ref pipeline_spec) &mdash; Authoring stages, parameter sweeps (`seeds`, `count`), defaults, and reusable test suites (`include:`).
+  2. [Pipeline YAML Specification](@ref pipeline_spec) &mdash; Authoring stages, parameter sweeps (`matrix`, `count`), defaults, and reusable test suites (`include:`).
   3. [Examples Catalog](@ref examples_catalog) &mdash; EDA SystemVerilog ALU pipeline flow with Assertion & Coverage collection.
   4. [Interactive HTML Report](@ref html_report) &mdash; Analyzing per-stage test execution metrics, waveform artifacts, and logs.
   5. [System Architecture](@ref user_architecture) &mdash; Process isolation, build artifact hand-offs (`${BUILD_DIR}` &rarr; `${TEST_DIR}`), and relative path execution.

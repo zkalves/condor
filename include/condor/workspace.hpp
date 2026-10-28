@@ -63,14 +63,23 @@ struct StageManifestEntry {
  * condor_runs/
  * ├── latest -> 20261026_143022_948271
  * └── 20261026_143022_948271/
- *     ├── pipeline_report.html
- *     ├── compile/
- *     │   ├── stage_manifest.txt
- *     │   └── 0001/
- *     │       ├── runner.sh
- *     │       ├── job.log
- *     │       └── job_status.txt
- *     └── sim/
+ *     ├── artifacts/
+ *     │   ├── report.html
+ *     │   └── junit_report.xml
+ *     ├── pipeline/
+ *     │   ├── pre_hook.log
+ *     │   ├── post_hook.log
+ *     │   └── pipeline_summary.yaml
+ *     └── stages/
+ *         ├── compile/
+ *         │   ├── stage_manifest.txt
+ *         │   └── 0001/
+ *         │       ├── job_runner.sh
+ *         │       ├── stdout.log
+ *         │       ├── stderr.err
+ *         │       ├── job_status.txt
+ *         │       └── job_status.yaml
+ *         └── sim/
  * @endcode
  */
 class WorkspaceManager {
@@ -101,9 +110,27 @@ public:
     const std::filesystem::path& run_dir() const { return run_dir_; }
 
     /**
+     * @brief Gets the filesystem path for the pipeline artifacts directory (`<run_dir>/artifacts`).
+     * @return Path to `<run_dir>/artifacts`.
+     */
+    std::filesystem::path artifacts_dir() const;
+
+    /**
+     * @brief Gets the filesystem path for the pipeline operational and internal logs directory (`<run_dir>/pipeline`).
+     * @return Path to `<run_dir>/pipeline`.
+     */
+    std::filesystem::path pipeline_dir() const;
+
+    /**
+     * @brief Gets the filesystem path for the workload stages root directory (`<run_dir>/stages`).
+     * @return Path to `<run_dir>/stages`.
+     */
+    std::filesystem::path stages_dir() const;
+
+    /**
      * @brief Gets the filesystem path for a specific stage directory.
      * @param stage_name Identifier of stage.
-     * @return Path to `<run_dir>/<stage_name>`.
+     * @return Path to `<run_dir>/stages/<stage_name>`.
      */
     std::filesystem::path stage_dir(std::string_view stage_name) const;
 
@@ -111,7 +138,7 @@ public:
      * @brief Gets the filesystem path for a specific job directory.
      * @param stage_name Identifier of parent stage.
      * @param job_id Unique 4-digit job ID.
-     * @return Path to `<run_dir>/<stage_name>/<job_id>`.
+     * @return Path to `<run_dir>/stages/<stage_name>/<job_id>`.
      */
     std::filesystem::path job_dir(std::string_view stage_name, std::string_view job_id) const;
 

@@ -210,7 +210,7 @@ TEST_CASE(count_expansion) {
     std::string yaml = R"(
 defaults:
   job:
-    command: "sim --test=${TEST_NAME} --seed=${SEED}"
+    command: "sim --test=${TEST_NAME} --index=${INDEX}"
 stages:
   - name: sim
     jobs:
@@ -221,15 +221,12 @@ stages:
     ASSERT_TRUE(config.stages[0].jobs.size() == 3);
     ASSERT_TRUE(config.stages[0].jobs[0].name == "stress_0");
     ASSERT_TRUE(config.stages[0].jobs[0].variables.at("INDEX") == "0");
-    ASSERT_TRUE(config.stages[0].jobs[0].variables.at("SEED") == "1");
 
     ASSERT_TRUE(config.stages[0].jobs[1].name == "stress_1");
     ASSERT_TRUE(config.stages[0].jobs[1].variables.at("INDEX") == "1");
-    ASSERT_TRUE(config.stages[0].jobs[1].variables.at("SEED") == "2");
 
     ASSERT_TRUE(config.stages[0].jobs[2].name == "stress_2");
     ASSERT_TRUE(config.stages[0].jobs[2].variables.at("INDEX") == "2");
-    ASSERT_TRUE(config.stages[0].jobs[2].variables.at("SEED") == "3");
 }
 
 TEST_CASE(gpl_interactive_notice) {
@@ -335,7 +332,6 @@ stages:
 )";
     auto config_settings = YamlParser::parse_string(yaml_settings);
     ASSERT_TRUE(config_settings.settings.backend == "lsf");
-    ASSERT_TRUE(config_settings.settings.default_backend == "lsf");
 
     // 2. Valid: settings: backend: slurm
     std::string yaml_slurm_settings = R"(
@@ -351,7 +347,7 @@ stages:
     auto config_def = YamlParser::parse_string(yaml_slurm_settings);
     ASSERT_TRUE(config_def.settings.backend == "slurm");
 
-    // 3. Error: alias default_backend is rejected
+    // 3. Error: invalid setting default_backend is rejected
     std::string yaml_default_settings = R"(
 name: test_default_backend_settings
 settings:
@@ -382,7 +378,7 @@ stages:
     }
     ASSERT_TRUE(caught_top);
 
-    // 4. Error: job-level backend is rejected
+    // 4. Valid: job-level backend is parsed
     std::string yaml_job = R"(
 name: test_backend_job
 stages:
@@ -392,51 +388,37 @@ stages:
         command: "echo probe"
         backend: local
 )";
-    bool caught_job = false;
-    try {
-        YamlParser::parse_string(yaml_job);
-    } catch (const ConfigurationError& e) {
-        caught_job = true;
-    }
-    ASSERT_TRUE(caught_job);
+    auto cfg_job = YamlParser::parse_string(yaml_job);
+    ASSERT_TRUE(cfg_job.stages[0].jobs[0].backend == "local");
 
-    // 5. Error: stage-level backend is rejected
+    // 5. Valid: stage-level backend is parsed
     std::string yaml_stage = R"(
 name: test_backend_stage
 stages:
   - name: test_stage
-    backend: local
+    backend: slurm
     jobs:
       - name: job_s
         command: "echo s"
 )";
-    bool caught_stage = false;
-    try {
-        YamlParser::parse_string(yaml_stage);
-    } catch (const ConfigurationError& e) {
-        caught_stage = true;
-    }
-    ASSERT_TRUE(caught_stage);
+    auto cfg_stage = YamlParser::parse_string(yaml_stage);
+    ASSERT_TRUE(cfg_stage.stages[0].backend == "slurm");
 
-    // 6. Error: defaults backend is rejected
+    // 6. Valid: defaults backend is parsed
     std::string yaml_defaults = R"(
 name: test_backend_defaults
 defaults:
   job:
-    backend: local
+    backend: lsf
 stages:
   - name: test_stage
     jobs:
       - name: job_d
         command: "echo d"
 )";
-    bool caught_defaults = false;
-    try {
-        YamlParser::parse_string(yaml_defaults);
-    } catch (const ConfigurationError& e) {
-        caught_defaults = true;
-    }
-    ASSERT_TRUE(caught_defaults);
+    auto cfg_defaults = YamlParser::parse_string(yaml_defaults);
+    ASSERT_TRUE(cfg_defaults.defaults.backend == "lsf");
+    ASSERT_TRUE(cfg_defaults.stages[0].jobs[0].backend == "lsf");
 }
 
 TEST_CASE(schema_validation_unknown_property) {
@@ -564,7 +546,7 @@ stages:
     jobs:
       - name: job_single_dep
         command: "echo test"
-        depends_on: "0001"
+        depends_on: "stage_single_dep/0001"
       - name: job_seq_deps
         command: "echo tests"
         depends_on:
@@ -727,4 +709,160 @@ stages:
     // Does not contain ${ARGS}, so auto-appended
     ASSERT_TRUE(j_auto.command == "exec_tool --flag 1");
     ASSERT_TRUE(j_auto.variables.at("ARGS") == "--flag 1");
+}
+
+TEST_CASE(job_level_dag_cycle_detection) {
+    // Direct cycle between jobs in same stage
+    std::string yaml_cycle = R"(
+name: test_job_cycle
+stages:
+  - name: sim
+    jobs:
+      - name: job_a
+        command: "echo a"
+        depends_on: [job_b]
+      - name: job_b
+        command: "echo b"
+        depends_on: [job_a]
+)";
+    ASSERT_THROWS(YamlParser::parse_string(yaml_cycle), ConfigurationError);
+
+    // Self dependency
+    std::string yaml_self = R"(
+name: test_job_self
+stages:
+  - name: sim
+    jobs:
+      - name: job_self
+        command: "echo self"
+        depends_on: [job_self]
+)";
+    ASSERT_THROWS(YamlParser::parse_string(yaml_self), ConfigurationError);
+
+    // Valid dependencies should parse fine
+    std::string yaml_valid = R"(
+name: test_job_valid
+stages:
+  - name: sim
+    jobs:
+      - name: job_1
+        command: "echo 1"
+      - name: job_2
+        command: "echo 2"
+        depends_on: [job_1]
+      - name: job_3
+        command: "echo 3"
+        depends_on: [job_2]
+)";
+    auto cfg = YamlParser::parse_string(yaml_valid);
+    ASSERT_TRUE(cfg.stages[0].jobs.size() == 3);
+}
+
+TEST_CASE(execution_timeout_configuration) {
+    // 1. Not set means disabled (0 seconds)
+    std::string yaml_no_timeout = R"(
+name: test_no_timeout
+stages:
+  - name: sim
+    jobs:
+      - name: job_unlimited
+        command: "echo unlimited"
+)";
+    auto cfg_none = YamlParser::parse_string(yaml_no_timeout);
+    ASSERT_TRUE(cfg_none.defaults.timeout_sec == 0);
+    ASSERT_TRUE(cfg_none.stages[0].jobs[0].timeout_sec == 0);
+
+    // 2. Default inheritance, numeric/string formats, and explicit override to disabled ("0")
+    std::string yaml_timeout = R"(
+name: test_timeout
+defaults:
+  job:
+    timeout: "30s"
+stages:
+  - name: sim
+    jobs:
+      - name: job_default_timeout
+        command: "echo default"
+      - name: job_override_timeout
+        command: "echo override"
+        timeout: "1m"
+      - name: job_numeric_timeout
+        command: "echo num"
+        timeout: "120"
+      - name: job_disabled_timeout
+        command: "echo disabled"
+        timeout: "0"
+)";
+    auto cfg = YamlParser::parse_string(yaml_timeout);
+    ASSERT_TRUE(cfg.defaults.timeout_sec == 30);
+    ASSERT_TRUE(cfg.stages[0].jobs[0].timeout_sec == 30);
+    ASSERT_TRUE(cfg.stages[0].jobs[1].timeout_sec == 60);
+    ASSERT_TRUE(cfg.stages[0].jobs[2].timeout_sec == 120);
+    ASSERT_TRUE(cfg.stages[0].jobs[3].timeout_sec == 0);
+}
+
+TEST_CASE(working_dir_configuration) {
+    std::string yaml_workdir = R"(
+name: test_workdir
+defaults:
+  job:
+    working_dir: "/default/work"
+stages:
+  - name: sim
+    jobs:
+      - name: job_default
+        command: "echo default"
+      - name: job_override
+        command: "echo override"
+        working_dir: "${CONDOR_CWD}/custom"
+)";
+    auto cfg = YamlParser::parse_string(yaml_workdir);
+    ASSERT_TRUE(cfg.defaults.working_dir == "/default/work");
+    ASSERT_TRUE(cfg.stages[0].jobs[0].working_dir == "/default/work");
+    ASSERT_TRUE(cfg.stages[0].jobs[1].working_dir == "${CONDOR_CWD}/custom");
+}
+
+TEST_CASE(stage_execution_mode_configuration) {
+    std::string yaml_modes = R"(
+name: test_modes
+stages:
+  - name: build
+    mode: full
+    jobs:
+      - name: compile
+        command: "echo build"
+  - name: sim
+    mode: failed_only
+    jobs:
+      - name: test_1
+        command: "echo sim1"
+  - name: report
+    mode: cached
+    jobs:
+      - name: summary
+        command: "echo report"
+)";
+    auto cfg = YamlParser::parse_string(yaml_modes);
+    ASSERT_TRUE(cfg.stages[0].mode == StageExecutionMode::FULL);
+    ASSERT_TRUE(cfg.stages[1].mode == StageExecutionMode::FAILED_ONLY);
+    ASSERT_TRUE(cfg.stages[2].mode == StageExecutionMode::CACHED);
+}
+
+TEST_CASE(grid_poll_and_junit_settings) {
+    std::string yaml_settings = R"(
+name: test_settings
+settings:
+  grid_poll_interval_sec: 15
+  emit_junit_xml: true
+  junit_xml_path: "artifacts/test_results.xml"
+stages:
+  - name: sim
+    jobs:
+      - name: test_1
+        command: "echo 1"
+)";
+    auto cfg = YamlParser::parse_string(yaml_settings);
+    ASSERT_TRUE(cfg.settings.grid_poll_interval_sec == 15);
+    ASSERT_TRUE(cfg.settings.emit_junit_xml == true);
+    ASSERT_TRUE(cfg.settings.junit_xml_path == "artifacts/test_results.xml");
 }

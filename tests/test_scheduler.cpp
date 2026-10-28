@@ -288,6 +288,10 @@ stages:
     ASSERT_TRUE(std::filesystem::exists(stage_dir / "pre_hook.log"));
     ASSERT_TRUE(std::filesystem::exists(stage_dir / "stage_marker.txt"));
 
+    // Verify global pipeline pre-hook and summary in pipeline/
+    ASSERT_TRUE(std::filesystem::exists(ws.pipeline_dir() / "pre_hook.log"));
+    ASSERT_TRUE(std::filesystem::exists(ws.pipeline_dir() / "pipeline_summary.yaml"));
+
     // Verify job hook executed from defaults.job.hooks
     auto job_dir = ws.job_dir("stage_unified", "0001");
     ASSERT_TRUE(std::filesystem::exists(job_dir / "pre_hook.log"));
@@ -325,7 +329,7 @@ stages:
     ASSERT_TRUE(ok);
 
     // Verify report.html contains link to job's HTML report
-    std::filesystem::path report_path = ws.run_dir() / "report.html";
+    std::filesystem::path report_path = ws.artifacts_dir() / "report.html";
     ASSERT_TRUE(std::filesystem::exists(report_path));
 
     std::ifstream ifs(report_path);
@@ -334,4 +338,72 @@ stages:
     ASSERT_TRUE(content.find("HTML Report") != std::string::npos);
 
     std::filesystem::remove_all(test_dir, ec);
+}
+
+TEST_CASE(scheduler_rerun_failed_only_canonical) {
+    std::string yaml_base = R"(
+name: base_run
+settings:
+  on_failure_action: continue
+stages:
+  - name: sim
+    mode: failed_only
+    jobs:
+      - name: job_pass
+        command: "echo pass"
+      - name: job_fail
+        command: "exit 42"
+)";
+
+    std::string base_dir = "./test_sched_rerun_base";
+    std::string rerun_dir = "./test_sched_rerun_next";
+    std::error_code ec;
+    std::filesystem::remove_all(base_dir, ec);
+    std::filesystem::remove_all(rerun_dir, ec);
+
+    auto base_config = YamlParser::parse_string(yaml_base);
+    base_config.settings.no_interactive = true;
+
+    WorkspaceManager ws_base(base_dir);
+    ws_base.initialize();
+
+    Scheduler sched_base(base_config, ws_base);
+    sched_base.run();
+
+    // Verify canonical base directory paths
+    ASSERT_TRUE(std::filesystem::exists(ws_base.run_dir() / "stages" / "sim" / "0001" / "job_status.yaml"));
+    ASSERT_TRUE(std::filesystem::exists(ws_base.run_dir() / "stages" / "sim" / "0002" / "job_status.yaml"));
+
+    // Second run: rerun failed only from base_dir
+    std::string yaml_rerun = R"(
+name: rerun_run
+stages:
+  - name: sim
+    mode: failed_only
+    jobs:
+      - name: job_pass
+        command: "echo pass"
+      - name: job_fail
+        command: "echo now_passing"
+)";
+
+    auto rerun_config = YamlParser::parse_string(yaml_rerun);
+    rerun_config.settings.no_interactive = true;
+    rerun_config.settings.rerun_base_dir = ws_base.run_dir().string();
+
+    WorkspaceManager ws_rerun(rerun_dir);
+    ws_rerun.initialize();
+
+    Scheduler sched_rerun(rerun_config, ws_rerun);
+    bool rerun_ok = sched_rerun.run();
+    ASSERT_TRUE(rerun_ok);
+
+    // Job 0001 should be cached (not executed in rerun_dir, so stdout.log does not exist)
+    ASSERT_FALSE(std::filesystem::exists(ws_rerun.run_dir() / "stages" / "sim" / "0001" / "stdout.log"));
+
+    // Job 0002 should have been re-executed and passed
+    ASSERT_TRUE(std::filesystem::exists(ws_rerun.run_dir() / "stages" / "sim" / "0002" / "stdout.log"));
+
+    std::filesystem::remove_all(base_dir, ec);
+    std::filesystem::remove_all(rerun_dir, ec);
 }
