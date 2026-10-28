@@ -35,12 +35,20 @@
 #include "condor/logging.hpp"
 #include "condor/menu.hpp"
 
+#ifndef CONDOR_VERSION
+#define CONDOR_VERSION "1.0.0"
+#endif
+
 using namespace condor;
 
 int main(int argc, char** argv) {
-    // Early command handler for GNU GPL legal queries ('condor --warranty' and 'condor --license')
+    // Early command handler for GNU GPL legal queries ('condor --warranty' and 'condor --license') and version
     if (argc >= 2) {
         std::string_view arg(argv[1]);
+        if (arg == "-v" || arg == "--version" || arg == "version") {
+            std::cout << "condor " CONDOR_VERSION "\n";
+            return 0;
+        }
         if (arg == "--warranty" || arg == "warranty") {
             RuntimeMenu::print_warranty();
             return 0;
@@ -52,6 +60,7 @@ int main(int argc, char** argv) {
     }
 
     CLI::App app{"condor (Concurrent + Dependency + Orchestrator) - Modern C++20 Parallel Process and Grid Orchestrator"};
+    app.set_version_flag("-v,--version", "condor " CONDOR_VERSION);
 
     std::string pipeline_config_path;
     std::string stage_name;
