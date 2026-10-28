@@ -13,6 +13,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,10 +23,10 @@ jobs:
   release-please:
     name: Automated Release & Semantic Versioning
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - name: Run Release Please
         uses: googleapis/release-please-action@v5
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json

@@ -3,6 +3,7 @@
     ".": {
       "release-type": "simple",
       "package-name": "condor",
+      "initial-version": "1.0.0",
       "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md",
       "changelog-sections": [
