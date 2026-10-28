@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Verilator and Dependencies
         run: |
@@ -78,7 +78,7 @@ jobs:
           fi
 
       - name: Upload Run Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: verilator-run-${{ matrix.mode }}
           path: condor_runs/
