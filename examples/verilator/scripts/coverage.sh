@@ -14,6 +14,16 @@ set -e
 VERILATOR_COV="${CONDOR_VAR_VERILATOR_COV:-verilator_coverage}"
 
 if ! command -v "$VERILATOR_COV" >/dev/null 2>&1; then
+    for candidate in /opt/verilator/v*/bin/verilator_coverage /opt/verilator/current/bin/verilator_coverage /opt/verilator/default/bin/verilator_coverage; do
+        if [ -x "$candidate" ]; then
+            VERILATOR_COV="$candidate"
+            export PATH="$(dirname "$candidate"):$PATH"
+            break
+        fi
+    done
+fi
+
+if ! command -v "$VERILATOR_COV" >/dev/null 2>&1; then
     echo "ERROR: '$VERILATOR_COV' was not found in PATH." >&2
     echo "Please ensure verilator_coverage is installed and available in PATH." >&2
     exit 127
@@ -24,7 +34,7 @@ echo " [COVERAGE] Merging and Analyzing Verilator Test Coverage Data"
 echo "=================================================================="
 
 COV_FILES=()
-for f in "${CONDOR_RUN_DIR}"/sim_tests/*/coverage.dat; do
+for f in "${CONDOR_RUN_DIR}"/stages/sim_tests/*/coverage.dat "${CONDOR_RUN_DIR}"/sim_tests/*/coverage.dat; do
     if [ -f "$f" ]; then
         COV_FILES+=("$f")
         echo "Found coverage data: $f"

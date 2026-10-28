@@ -31,6 +31,10 @@
 #include "Valu.h"
 #include "verilated.h"
 
+#ifndef VM_COVERAGE
+#define VM_COVERAGE 0
+#endif
+
 #if VM_COVERAGE
 #include "verilated_cov.h"
 #endif
@@ -343,9 +347,11 @@ int main(int argc, char** argv) {
                 << "assertions_verified: " << assertions << "\n"
                 << "simulation_time_ns: " << g_sim_time << "\n"
                 << "coverage_enabled: " << (VM_COVERAGE ? "true" : "false") << "\n";
+#if VM_COVERAGE
             if (!coverage_file.empty()) {
                 yfs << "coverage_file: \"" << coverage_file << "\"\n";
             }
+#endif
         }
     }
 

@@ -26,6 +26,16 @@ fi
 VERILATOR_BIN="${CONDOR_VAR_VERILATOR_BIN:-verilator}"
 
 if ! command -v "$VERILATOR_BIN" >/dev/null 2>&1; then
+    for candidate in /opt/verilator/v*/bin/verilator /opt/verilator/current/bin/verilator /opt/verilator/default/bin/verilator; do
+        if [ -x "$candidate" ]; then
+            VERILATOR_BIN="$candidate"
+            export PATH="$(dirname "$candidate"):$PATH"
+            break
+        fi
+    done
+fi
+
+if ! command -v "$VERILATOR_BIN" >/dev/null 2>&1; then
     echo "ERROR: '$VERILATOR_BIN' was not found in PATH." >&2
     echo "Please ensure Verilator is installed and available in PATH." >&2
     exit 127

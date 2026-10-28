@@ -34,6 +34,15 @@ fi
 NOW=$(date '+%Y-%m-%d %H:%M:%S')
 
 VERILATOR_BIN="${CONDOR_VAR_VERILATOR_BIN:-verilator}"
+if ! command -v "$VERILATOR_BIN" >/dev/null 2>&1; then
+    for candidate in /opt/verilator/v*/bin/verilator /opt/verilator/current/bin/verilator /opt/verilator/default/bin/verilator; do
+        if [ -x "$candidate" ]; then
+            VERILATOR_BIN="$candidate"
+            export PATH="$(dirname "$candidate"):$PATH"
+            break
+        fi
+    done
+fi
 if [ -n "$VERILATOR_ROOT" ]; then
     if ! "$VERILATOR_BIN" --version >/dev/null 2>&1; then
         unset VERILATOR_ROOT
@@ -59,7 +68,12 @@ pipeline_summary:
   stages:
 EOF
 
-for sdir in "${CONDOR_RUN_DIR}"/*; do
+STAGES_BASE="${CONDOR_RUN_DIR}/stages"
+if [ ! -d "$STAGES_BASE" ]; then
+    STAGES_BASE="${CONDOR_RUN_DIR}"
+fi
+
+for sdir in "$STAGES_BASE"/*; do
     if [ -d "$sdir" ]; then
         STAGE_NAME=$(basename "$sdir")
         if [ "$STAGE_NAME" = "report" ] || [ "$STAGE_NAME" = "bin" ]; then

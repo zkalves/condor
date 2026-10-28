@@ -21,7 +21,7 @@ settings:
   status_interval_sec: 5
 
 hooks:
-  post: "if [ -f \"${CONDOR_RUN_DIR}/report/0001/terminal_report.txt\" ]; then cat \"${CONDOR_RUN_DIR}/report/0001/terminal_report.txt\"; elif [ -f \"${CONDOR_RUN_DIR}/report/0001/test_report.txt\" ]; then cat \"${CONDOR_RUN_DIR}/report/0001/test_report.txt\"; fi"
+  post: "if [ -f \"${CONDOR_RUN_DIR}/stages/report/0001/terminal_report.txt\" ]; then cat \"${CONDOR_RUN_DIR}/stages/report/0001/terminal_report.txt\"; elif [ -f \"${CONDOR_RUN_DIR}/report/0001/terminal_report.txt\" ]; then cat \"${CONDOR_RUN_DIR}/report/0001/terminal_report.txt\"; fi"
   always: true
 
 stages:
