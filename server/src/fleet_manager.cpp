@@ -71,7 +71,9 @@ void FleetManager::register_client(const std::string& run_id,
     run.project = project;
     run.tags = tags;
     run.client_socket_fd = client_fd;
-    run.status = "CONNECTED";
+    if (run.status == "UNKNOWN") {
+        run.status = "CONNECTED";
+    }
     run.last_seen_ms = now_ms();
     if (run.start_time_ms == 0) run.start_time_ms = run.last_seen_ms;
 
@@ -103,11 +105,11 @@ void FleetManager::update_telemetry(const std::string& run_id, const nlohmann::j
     if (telemetry.contains("progress") && telemetry["progress"].is_object()) {
         const auto& p = telemetry["progress"];
         run.total_jobs = p.value("total_jobs", run.total_jobs);
-        run.completed_jobs = p.value("completed_jobs", run.completed_jobs);
         run.running_jobs = p.value("running_jobs", run.running_jobs);
         run.passed_jobs = p.value("passed_jobs", run.passed_jobs);
         run.failed_jobs = p.value("failed_jobs", run.failed_jobs);
         run.skipped_jobs = p.value("skipped_jobs", run.skipped_jobs);
+        run.completed_jobs = p.value("completed_jobs", run.passed_jobs + run.failed_jobs + run.skipped_jobs);
         run.elapsed_sec = p.value("elapsed_sec", run.elapsed_sec);
     }
 
@@ -137,11 +139,49 @@ void FleetManager::record_event(const std::string& run_id, const std::string& ev
     auto it = runs_.find(run_id);
     if (it != runs_.end()) {
         it->second.last_seen_ms = now_ms();
-        if (event_type == "pipeline_aborted") {
+        if (event_type == "pipeline_started") {
+            it->second.status = "RUNNING";
+            it->second.total_jobs = payload.value("total_jobs", it->second.total_jobs);
+        } else if (event_type == "job_started") {
+            it->second.running_jobs++;
+            ActiveJobRecord rec;
+            rec.job_id = payload.value("job_id", "");
+            rec.stage = payload.value("stage", "");
+            rec.name = payload.value("name", "");
+            rec.pid = payload.value("pid", "");
+            it->second.active_jobs.push_back(std::move(rec));
+        } else if (event_type == "job_finished") {
+            if (it->second.running_jobs > 0) it->second.running_jobs--;
+            std::string st = payload.value("status", "");
+            if (st == "PASSED" || st == "FAILED (ALLOWED)") {
+                it->second.passed_jobs++;
+            } else if (st == "SKIPPED") {
+                it->second.skipped_jobs++;
+            } else {
+                it->second.failed_jobs++;
+            }
+            it->second.completed_jobs = it->second.passed_jobs + it->second.failed_jobs + it->second.skipped_jobs;
+            std::string jid = payload.value("job_id", "");
+            std::string stg = payload.value("stage", "");
+            it->second.active_jobs.erase(
+                std::remove_if(it->second.active_jobs.begin(), it->second.active_jobs.end(),
+                               [&](const ActiveJobRecord& r) { return r.job_id == jid && r.stage == stg; }),
+                it->second.active_jobs.end());
+        } else if (event_type == "pipeline_aborted") {
             it->second.status = "ABORTED";
+            it->second.active_jobs.clear();
+            it->second.running_jobs = 0;
         } else if (event_type == "pipeline_finished") {
             bool success = payload.value("success", false);
             it->second.status = success ? "PASSED" : "FAILED";
+            it->second.passed_jobs = payload.value("passed_jobs", it->second.passed_jobs);
+            it->second.failed_jobs = payload.value("failed_jobs", it->second.failed_jobs);
+            it->second.skipped_jobs = payload.value("skipped_jobs", it->second.skipped_jobs);
+            it->second.total_jobs = payload.value("total_jobs", it->second.total_jobs);
+            it->second.completed_jobs = it->second.passed_jobs + it->second.failed_jobs + it->second.skipped_jobs;
+            it->second.elapsed_sec = payload.value("elapsed_sec", it->second.elapsed_sec);
+            it->second.active_jobs.clear();
+            it->second.running_jobs = 0;
         } else if (event_type == "scheduler_paused") {
             it->second.status = "PAUSED";
         } else if (event_type == "scheduler_resumed") {
@@ -159,6 +199,7 @@ void FleetManager::record_event(const std::string& run_id, const std::string& ev
         notif["event"] = event_type;
         notif["run_id"] = run_id;
         notif["payload"] = payload;
+        notif["run"] = it->second.to_json();
         broadcast_to_dashboards(notif);
     }
 }
@@ -173,12 +214,13 @@ void FleetManager::remove_client_fd(int client_fd) {
         auto rit = runs_.find(run_id);
         if (rit != runs_.end() && rit->second.client_socket_fd == client_fd) {
             rit->second.client_socket_fd = -1;
-            if (rit->second.status == "RUNNING" || rit->second.status == "PAUSED") {
+            if (rit->second.status == "RUNNING" || rit->second.status == "PAUSED" || rit->second.status == "CONNECTED") {
                 rit->second.status = "DISCONNECTED";
             }
             nlohmann::json notif;
             notif["type"] = "client_disconnected";
             notif["run_id"] = run_id;
+            notif["run"] = rit->second.to_json();
             broadcast_to_dashboards(notif);
         }
     }

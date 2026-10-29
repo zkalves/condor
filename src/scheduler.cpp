@@ -1200,9 +1200,26 @@ bool Scheduler::run() {
             {"total_jobs", initial_stats.total_jobs},
             {"max_parallel_jobs", max_slots_.load()}
         });
+        nlohmann::json tel;
+        tel["status"] = "RUNNING";
+        tel["progress"] = {
+            {"total_jobs", initial_stats.total_jobs},
+            {"queued_jobs", initial_stats.queued_jobs},
+            {"running_jobs", 0},
+            {"passed_jobs", 0},
+            {"failed_jobs", 0},
+            {"skipped_jobs", initial_stats.skipped_jobs},
+            {"completed_jobs", 0},
+            {"elapsed_sec", 0.0}
+        };
+        tel["active_jobs"] = nlohmann::json::array();
+        remote_client_->send_telemetry(tel);
     }
 
     auto last_telemetry_time = std::chrono::steady_clock::now();
+    size_t prev_running_jobs = static_cast<size_t>(-1);
+    size_t prev_passed_jobs = static_cast<size_t>(-1);
+    size_t prev_failed_jobs = static_cast<size_t>(-1);
 
     // Global Pre-hook
     int global_pre_rc = execute_hook(config_.hooks, true);
@@ -1245,8 +1262,17 @@ bool Scheduler::run() {
         if (remote_client_ && remote_client_->is_enabled()) {
             int interval_ms = config_.settings.server.poll_interval_ms;
             if (interval_ms <= 0) interval_ms = 500;
-            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_telemetry_time).count() >= interval_ms) {
+            int64_t elapsed_since_last = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_telemetry_time).count();
+            bool state_changed = (stats.running_jobs != prev_running_jobs ||
+                                  stats.passed_jobs != prev_passed_jobs ||
+                                  stats.failed_jobs != prev_failed_jobs);
+
+            if (state_changed || elapsed_since_last >= interval_ms) {
                 last_telemetry_time = now;
+                prev_running_jobs = stats.running_jobs;
+                prev_passed_jobs = stats.passed_jobs;
+                prev_failed_jobs = stats.failed_jobs;
+
                 nlohmann::json tel;
                 tel["status"] = dispatch_paused_ ? "PAUSED" : (aborted_ ? "ABORTED" : "RUNNING");
                 tel["progress"] = {
@@ -1256,6 +1282,7 @@ bool Scheduler::run() {
                     {"passed_jobs", stats.passed_jobs},
                     {"failed_jobs", stats.failed_jobs},
                     {"skipped_jobs", stats.skipped_jobs},
+                    {"completed_jobs", stats.passed_jobs + stats.failed_jobs + stats.skipped_jobs},
                     {"elapsed_sec", stats.elapsed_sec}
                 };
                 nlohmann::json act_arr = nlohmann::json::array();
@@ -1299,12 +1326,28 @@ bool Scheduler::run() {
         pipeline_success = false;
     }
 
-    // Emit final server status event
+    // Emit final telemetry frame and finished event
     if (remote_client_ && remote_client_->is_enabled()) {
+        nlohmann::json tel;
+        tel["status"] = pipeline_success ? "PASSED" : "FAILED";
+        tel["progress"] = {
+            {"total_jobs", final_stats.total_jobs},
+            {"queued_jobs", 0},
+            {"running_jobs", 0},
+            {"passed_jobs", final_stats.passed_jobs},
+            {"failed_jobs", final_stats.failed_jobs},
+            {"skipped_jobs", final_stats.skipped_jobs},
+            {"completed_jobs", final_stats.passed_jobs + final_stats.failed_jobs + final_stats.skipped_jobs},
+            {"elapsed_sec", final_stats.elapsed_sec}
+        };
+        tel["active_jobs"] = nlohmann::json::array();
+        remote_client_->send_telemetry(tel);
+
         remote_client_->send_event("pipeline_finished", {
             {"success", pipeline_success},
             {"passed_jobs", final_stats.passed_jobs},
             {"failed_jobs", final_stats.failed_jobs},
+            {"skipped_jobs", final_stats.skipped_jobs},
             {"total_jobs", final_stats.total_jobs},
             {"elapsed_sec", final_stats.elapsed_sec}
         });
