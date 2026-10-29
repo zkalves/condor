@@ -33,6 +33,8 @@
 
 namespace condor {
 
+class RemoteServerClient;
+
 /**
  * @struct JobRuntimeState
  * @brief Dynamic runtime execution state and monitoring data tracked by the scheduler for a single job.
@@ -98,6 +100,18 @@ public:
      * @brief Toggles dispatch pause state (stops launching new jobs while allowing running jobs to finish).
      */
     void toggle_pause();
+
+    /**
+     * @brief Explicitly sets the dispatch pause state.
+     * @param pause_state If true, pause job launches; if false, resume launches.
+     */
+    void set_paused(bool pause_state);
+
+    /**
+     * @brief Attaches a remote telemetry and control client to this scheduler instance.
+     * @param client Pointer to RemoteServerClient (may be nullptr if running offline).
+     */
+    void set_remote_client(RemoteServerClient* client);
 
     /**
      * @brief Checks if job dispatching is currently paused.
@@ -171,6 +185,7 @@ private:
     std::atomic<bool> stage_barrier_triggered_{false};
 
     mutable std::mutex mutex_;
+    RemoteServerClient* remote_client_{nullptr};
     std::unique_ptr<ProgressDisplay> progress_;
     std::chrono::steady_clock::time_point pipeline_start_time_;
     std::chrono::steady_clock::time_point last_grid_poll_time_;

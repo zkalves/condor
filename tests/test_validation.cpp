@@ -21,6 +21,7 @@
 #include "condor/parser.hpp"
 #include "condor/menu.hpp"
 #include "condor/backend.hpp"
+#include "condor/remote_client.hpp"
 #include <CLI/CLI.hpp>
 #include <sstream>
 
@@ -1092,4 +1093,76 @@ TEST_CASE(cli_options_validation) {
     ASSERT_EQ(res.size(), 1);
     ASSERT_EQ(res[0], "vcs=4");
     ASSERT_EQ(pipe_file, "pipeline.yaml");
+}
+
+TEST_CASE(server_url_parsing) {
+    std::string proto, host, path;
+    int port = 0;
+
+    ASSERT_TRUE(RemoteServerClient::parse_url("ws://127.0.0.1:8080/api/v1/ws", proto, host, port, path));
+    ASSERT_EQ(proto, "ws");
+    ASSERT_EQ(host, "127.0.0.1");
+    ASSERT_EQ(port, 8080);
+    ASSERT_EQ(path, "/api/v1/ws");
+
+    ASSERT_TRUE(RemoteServerClient::parse_url("http://telemetry.internal/status", proto, host, port, path));
+    ASSERT_EQ(proto, "http");
+    ASSERT_EQ(host, "telemetry.internal");
+    ASSERT_EQ(port, 80);
+    ASSERT_EQ(path, "/status");
+
+    ASSERT_TRUE(RemoteServerClient::parse_url("https://secure.host:8443/report", proto, host, port, path));
+    ASSERT_EQ(proto, "https");
+    ASSERT_EQ(host, "secure.host");
+    ASSERT_EQ(port, 8443);
+    ASSERT_EQ(path, "/report");
+
+    ASSERT_FALSE(RemoteServerClient::parse_url("", proto, host, port, path));
+}
+
+TEST_CASE(parser_server_configuration) {
+    std::string yaml_str = R"(
+name: server_test_pipeline
+settings:
+  server:
+    enabled: true
+    url: "ws://condor.internal:8080/ws"
+    token: "secret123"
+    project: "asic_top"
+    tags: ["nightly", "regression"]
+    poll_interval_ms: 250
+stages:
+  - name: stage1
+    jobs:
+      - name: job1
+        command: "echo test"
+)";
+
+    auto config = YamlParser::parse_string(yaml_str);
+    ASSERT_TRUE(config.settings.server.enabled);
+    ASSERT_EQ(config.settings.server.url, "ws://condor.internal:8080/ws");
+    ASSERT_EQ(config.settings.server.token, "secret123");
+    ASSERT_EQ(config.settings.server.project, "asic_top");
+    ASSERT_EQ(config.settings.server.tags.size(), 2);
+    ASSERT_EQ(config.settings.server.tags[0], "nightly");
+    ASSERT_EQ(config.settings.server.tags[1], "regression");
+    ASSERT_EQ(config.settings.server.poll_interval_ms, 250);
+}
+
+TEST_CASE(remote_client_offline_safety) {
+    // When enabled is false, client must report is_enabled() false and start/stop must be safe no-ops
+    ServerConfig cfg;
+    cfg.enabled = false;
+    cfg.url = "ws://localhost:9999/fake";
+
+    RemoteServerClient client(cfg, "run_123", "pipe_test");
+    ASSERT_FALSE(client.is_enabled());
+    ASSERT_FALSE(client.is_connected());
+
+    // Safe no-ops
+    client.start();
+    ASSERT_FALSE(client.is_connected());
+    client.send_event("test_event", {{"k", "v"}});
+    client.send_telemetry({{"status", "RUNNING"}});
+    client.stop();
 }

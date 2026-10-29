@@ -158,6 +158,25 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
         "purge_successful_logs": {
           "type": "boolean",
           "description": "Purge raw stdout/stderr logs of passed jobs upon completion"
+        },
+        "server": {
+          "type": "object",
+          "description": "Central reporting and remote control server settings",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "url": { "type": "string" },
+            "token": { "type": "string" },
+            "project": { "type": "string" },
+            "tags": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "poll_interval_ms": {
+              "type": "integer",
+              "minimum": 50
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

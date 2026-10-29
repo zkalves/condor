@@ -1414,4 +1414,23 @@ When a job times out, is aborted by user command, or triggers a failure policy:
 2. Condor waits up to `kill_grace_period_sec` (default: 3 seconds) for processes to terminate cleanly.
 3. If processes remain active after the grace period, `SIGKILL` is sent to force termination.
 
+---
+
+## 17. Central Telemetry & Remote Control (`server`)
+
+Condor pipelines can stream real-time progress and receive remote control commands (such as pause, resume, abort pipeline, or kill runaway jobs) from a central server.
+
+```yaml
+settings:
+  server:
+    enabled: true                                # Explicit opt-in; false operates 100% offline
+    url: "ws://condor-hub.internal:8080/ws"       # WebSocket or HTTP endpoint
+    token: "${CONDOR_SERVER_TOKEN}"              # Optional Bearer auth token
+    project: "asic_top_regression"               # Logical project tag
+    tags: ["nightly", "cadence-23.09"]           # Metadata labels
+    poll_interval_ms: 500                        # Telemetry streaming frequency
+```
+
+If `server.enabled: false` (or if omitted), Condor operates completely offline with zero network connections or background telemetry threads.
+
 
