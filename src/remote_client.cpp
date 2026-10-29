@@ -113,6 +113,16 @@ void RemoteServerClient::start() {
 void RemoteServerClient::stop() {
     if (!running_.load()) return;
 
+    // Give outbound queue up to 500ms to flush pending final events
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (std::chrono::steady_clock::now() < deadline) {
+        {
+            std::lock_guard<std::mutex> lock(queue_mutex_);
+            if (outbound_queue_.empty()) break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
     running_.store(false);
     disconnect_socket();
 

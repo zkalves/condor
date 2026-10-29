@@ -143,6 +143,21 @@ add_executable(condor src/main.cpp)
 target_compile_definitions(condor PRIVATE CONDOR_VERSION="${PROJECT_VERSION}")
 target_link_libraries(condor PRIVATE condor_core)
 
+# Condor Hub (Central Reporting & Remote Control Server)
+add_executable(condor-hub
+    server/src/fleet_manager.cpp
+    server/src/server.cpp
+    server/src/main.cpp
+)
+target_include_directories(condor-hub PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/server/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_link_libraries(condor-hub PRIVATE
+    condor_core
+    pthread
+)
+
 # Tests
 enable_testing()
 
