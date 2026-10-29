@@ -105,13 +105,37 @@ void ProgressDisplay::render_interactive(const ProgressStats& stats,
 
     int lines = 0;
 
-    // 1. Global DAG Progress Bar (expands dynamically to terminal width)
+    // Spinner animation frames to indicate active execution during long-running tasks
+    static constexpr std::array<char, 4> SPINNER = {'|', '/', '-', '\\'};
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    char spinner_char = SPINNER[(now_ms / 120) % SPINNER.size()];
+
+    // Calculate stage column width and prefix width to align all progress bars
+    size_t max_stage_len = 16;
+    for (const auto& s : stages) {
+        if (s.stage_name.length() > max_stage_len) {
+            max_stage_len = s.stage_name.length();
+        }
+    }
+    int stage_col_width = std::clamp(static_cast<int>(max_stage_len) + 1, 16, 26);
+    int prefix_width = 9 + stage_col_width + 1; // "  Stage: " (9) + stage_col_width + " " (1)
+
+    int bar_avail = cols - prefix_width - 29 - 2;
+    int bar_len = std::clamp(bar_avail, 10, 50);
+
+    // 1. Global DAG Progress Bar (aligned with stage progress bars)
     size_t completed = stats.passed_jobs + stats.failed_jobs + stats.skipped_jobs;
     int percent = (stats.total_jobs > 0) ? static_cast<int>((completed * 100) / stats.total_jobs) : 100;
 
-    std::string dag_prefix = "[DAG Pipeline] ";
+    bool pipeline_running = (stats.running_jobs > 0 || stats.queued_jobs > 0);
+    std::string dag_label = pipeline_running ? ("[DAG Pipeline " + std::string(1, spinner_char) + "]") : "[DAG Pipeline]";
+    std::ostringstream dag_prefix_ss;
+    dag_prefix_ss << std::left << std::setw(prefix_width) << dag_label;
+    std::string dag_prefix = dag_prefix_ss.str();
+
     std::ostringstream dag_suffix;
-    dag_suffix << " " << std::setw(3) << percent << "% | "
+    dag_suffix << " " << std::right << std::setw(3) << percent << "% | "
                << "Jobs: " << stats.total_jobs << " | "
                << "Running: " << stats.running_jobs << " | "
                << "Queued: " << stats.queued_jobs << " | "
@@ -119,9 +143,6 @@ void ProgressDisplay::render_interactive(const ProgressStats& stats,
                << "Elapsed: " << format_duration(stats.elapsed_sec);
     std::string dag_suffix_str = dag_suffix.str();
 
-    // Dynamically calculate remaining width for the bar
-    int dag_avail = cols - static_cast<int>(dag_prefix.length()) - static_cast<int>(dag_suffix_str.length()) - 2;
-    int bar_len = std::clamp(dag_avail, 10, 60);
     int filled = (percent * bar_len) / 100;
     filled = std::clamp(filled, 0, bar_len);
 
@@ -134,21 +155,13 @@ void ProgressDisplay::render_interactive(const ProgressStats& stats,
     lines++;
 
     // 2. Individual Independent Stage Progress Bars (dynamically scaled)
-    size_t max_stage_len = 16;
-    for (const auto& s : stages) {
-        if (s.stage_name.length() > max_stage_len) {
-            max_stage_len = s.stage_name.length();
-        }
-    }
-    int stage_col_width = std::clamp(static_cast<int>(max_stage_len) + 1, 16, 26);
-
     for (const auto& s : stages) {
         size_t stage_done = s.passed + s.failed + s.skipped;
         int stage_pct = (s.total > 0) ? static_cast<int>((stage_done * 100) / s.total) : 100;
 
         std::string state_badge = "[QUEUED]";
         if (s.running > 0) {
-            state_badge = "[RUNNING]";
+            state_badge = "[RUNNING " + std::string(1, spinner_char) + "]";
         } else if (s.failed > 0) {
             state_badge = "[FAILED]";
         } else if (s.passed == s.total && s.total > 0) {
@@ -169,22 +182,25 @@ void ProgressDisplay::render_interactive(const ProgressStats& stats,
         }
         std::string counts_str = counts_ss.str();
 
+        std::string s_name = s.stage_name;
+        if (static_cast<int>(s_name.length()) > stage_col_width) {
+            s_name = s_name.substr(0, stage_col_width);
+        }
+
         std::ostringstream prefix_ss;
-        prefix_ss << "  Stage: " << std::left << std::setw(stage_col_width) << s.stage_name << " ";
+        prefix_ss << "  Stage: " << std::left << std::setw(stage_col_width) << s_name << " ";
         std::string prefix_str = prefix_ss.str();
 
         std::ostringstream suffix_ss;
         suffix_ss << " " << std::right << std::setw(3) << stage_pct << "% "
-                  << std::left << std::setw(10) << state_badge << " "
+                  << std::left << std::setw(11) << state_badge << " "
                   << counts_str;
         std::string s_suffix_str = suffix_ss.str();
 
-        int s_bar_avail = cols - static_cast<int>(prefix_str.length()) - static_cast<int>(s_suffix_str.length()) - 2;
-        int s_bar_len = std::clamp(s_bar_avail, 10, 50);
-        int s_filled = (stage_pct * s_bar_len) / 100;
-        s_filled = std::clamp(s_filled, 0, s_bar_len);
+        int s_filled = (stage_pct * bar_len) / 100;
+        s_filled = std::clamp(s_filled, 0, bar_len);
 
-        std::string s_bar = "[" + std::string(s_filled, '#') + std::string(s_bar_len - s_filled, '-') + "]";
+        std::string s_bar = "[" + std::string(s_filled, '#') + std::string(bar_len - s_filled, '-') + "]";
         std::string stage_line = prefix_str + s_bar + s_suffix_str;
         if (static_cast<int>(stage_line.length()) > cols) {
             stage_line = stage_line.substr(0, cols);
@@ -199,7 +215,7 @@ void ProgressDisplay::render_interactive(const ProgressStats& stats,
         for (size_t i = 0; i < display_count; ++i) {
             const auto& job = active_jobs[i];
             std::ostringstream ticker_ss;
-            ticker_ss << "    * [" << job.job_id << "] " << job.stage_name << "/" << job.job_name
+            ticker_ss << "    " << spinner_char << " [" << job.job_id << "] " << job.stage_name << "/" << job.job_name
                       << " (PID: " << job.pid_or_grid_id << ") - "
                       << format_duration(job.elapsed_sec);
             std::string ticker_line = ticker_ss.str();
@@ -210,7 +226,7 @@ void ProgressDisplay::render_interactive(const ProgressStats& stats,
             lines++;
         }
         if (active_jobs.size() > display_count) {
-            std::cout << "    * ... and " << (active_jobs.size() - display_count) << " more active jobs\n";
+            std::cout << "    " << spinner_char << " ... and " << (active_jobs.size() - display_count) << " more active jobs\n";
             lines++;
         }
     }
