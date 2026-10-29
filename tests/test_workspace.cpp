@@ -77,3 +77,36 @@ TEST_CASE(workspace_initialization_and_symlink) {
     // Cleanup
     std::filesystem::remove_all(test_base, ec);
 }
+
+TEST_CASE(workspace_prune_old_runs) {
+    std::string test_base = "./test_prune_runs";
+    std::error_code ec;
+    std::filesystem::remove_all(test_base, ec);
+    std::filesystem::create_directories(test_base);
+
+    // Create 5 dummy timestamped runs
+    std::vector<std::string> dummy_runs = {
+        "20261029_100000_000001",
+        "20261029_100000_000002",
+        "20261029_100000_000003",
+        "20261029_100000_000004",
+        "20261029_100000_000005"
+    };
+    for (const auto& r : dummy_runs) {
+        std::filesystem::create_directories(std::filesystem::path(test_base) / r);
+    }
+
+    // Active run dir is the 5th
+    WorkspaceManager ws(test_base, (std::filesystem::path(test_base) / dummy_runs.back()).string());
+
+    // Prune keeping 2
+    ws.prune_old_runs(2);
+
+    ASSERT_FALSE(std::filesystem::exists(std::filesystem::path(test_base) / dummy_runs[0]));
+    ASSERT_FALSE(std::filesystem::exists(std::filesystem::path(test_base) / dummy_runs[1]));
+    ASSERT_FALSE(std::filesystem::exists(std::filesystem::path(test_base) / dummy_runs[2]));
+    ASSERT_TRUE(std::filesystem::exists(std::filesystem::path(test_base) / dummy_runs[3]));
+    ASSERT_TRUE(std::filesystem::exists(std::filesystem::path(test_base) / dummy_runs[4]));
+
+    std::filesystem::remove_all(test_base, ec);
+}

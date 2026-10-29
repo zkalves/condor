@@ -21,6 +21,7 @@
 #include "condor/parser.hpp"
 #include "condor/menu.hpp"
 #include "condor/backend.hpp"
+#include <CLI/CLI.hpp>
 #include <sstream>
 
 extern void register_test(const std::string& name, std::function<void()> func);
@@ -33,6 +34,7 @@ extern void register_test(const std::string& name, std::function<void()> func);
 
 #define ASSERT_TRUE(cond) if (!(cond)) std::exit(1);
 #define ASSERT_FALSE(cond) if (cond) std::exit(1);
+#define ASSERT_EQ(a, b) if (!((a) == (b))) std::exit(1);
 #define ASSERT_THROWS(expr, ExceptionType) \
     do { \
         bool threw = false; \
@@ -865,4 +867,229 @@ stages:
     ASSERT_TRUE(cfg.settings.grid_poll_interval_sec == 15);
     ASSERT_TRUE(cfg.settings.emit_junit_xml == true);
     ASSERT_TRUE(cfg.settings.junit_xml_path == "artifacts/test_results.xml");
+}
+
+TEST_CASE(resource_pools_parsing_and_inheritance) {
+    std::string yaml = R"(
+name: test_resources
+resources:
+  vcs_compiler: 4
+  vcs_runtime: 16
+  fpga_board: 2
+defaults:
+  job:
+    resources:
+      vcs_runtime: 2
+stages:
+  - name: compile
+    jobs:
+      - name: elab
+        command: "echo compile"
+        resources:
+          vcs_compiler: 1
+          vcs_runtime: 0
+  - name: sim
+    defaults:
+      resources:
+        vcs_runtime: 4
+    jobs:
+      - name: test_1
+        command: "echo sim1"
+      - name: test_2
+        command: "echo sim2"
+        resources:
+          fpga_board: 1
+)";
+    auto cfg = YamlParser::parse_string(yaml);
+    ASSERT_TRUE(cfg.resources.size() == 3);
+    ASSERT_TRUE(cfg.resources.at("vcs_compiler") == 4);
+    ASSERT_TRUE(cfg.resources.at("vcs_runtime") == 16);
+    ASSERT_TRUE(cfg.resources.at("fpga_board") == 2);
+
+    // compile stage job: vcs_compiler = 1, vcs_runtime was cleared with 0
+    const auto& elab_job = cfg.stages[0].jobs[0];
+    ASSERT_TRUE(elab_job.resources.count("vcs_compiler") == 1);
+    ASSERT_TRUE(elab_job.resources.at("vcs_compiler") == 1);
+    ASSERT_TRUE(elab_job.resources.count("vcs_runtime") == 0);
+
+    // sim stage job 1 inherits stage defaults: vcs_runtime = 4
+    const auto& test1_job = cfg.stages[1].jobs[0];
+    ASSERT_TRUE(test1_job.resources.at("vcs_runtime") == 4);
+
+    // sim stage job 2 inherits stage default vcs_runtime = 4 and adds fpga_board = 1
+    const auto& test2_job = cfg.stages[1].jobs[1];
+    ASSERT_TRUE(test2_job.resources.at("vcs_runtime") == 4);
+    ASSERT_TRUE(test2_job.resources.at("fpga_board") == 1);
+}
+
+TEST_CASE(resource_validation_failures) {
+    // 1. Invalid resource pool name (spaces)
+    std::string bad_name = R"(
+name: bad_res
+resources:
+  "invalid name": 4
+stages:
+  - name: s1
+    jobs:
+      - name: j1
+        command: echo 1
+)";
+    ASSERT_THROWS(YamlParser::parse_string(bad_name), ConfigurationError);
+
+    // 2. Resource pool capacity <= 0
+    std::string bad_cap = R"(
+name: bad_res
+resources:
+  vcs: 0
+stages:
+  - name: s1
+    jobs:
+      - name: j1
+        command: echo 1
+)";
+    ASSERT_THROWS(YamlParser::parse_string(bad_cap), ConfigurationError);
+
+    // 3. Job requests undefined resource
+    std::string undef_res = R"(
+name: bad_res
+resources:
+  vcs: 4
+stages:
+  - name: s1
+    jobs:
+      - name: j1
+        command: echo 1
+        resources:
+          unknown_lic: 1
+)";
+    ASSERT_THROWS(YamlParser::parse_string(undef_res), ConfigurationError);
+
+    // 4. Job requests tokens exceeding pool capacity
+    std::string exceed_cap = R"(
+name: bad_res
+resources:
+  vcs: 4
+stages:
+  - name: s1
+    jobs:
+      - name: j1
+        command: echo 1
+        resources:
+          vcs: 5
+)";
+    ASSERT_THROWS(YamlParser::parse_string(exceed_cap), ConfigurationError);
+
+    // 5. Negative resource tokens in job
+    std::string neg_req = R"(
+name: bad_res
+resources:
+  vcs: 4
+stages:
+  - name: s1
+    jobs:
+      - name: j1
+        command: echo 1
+        resources:
+          vcs: -1
+)";
+    ASSERT_THROWS(YamlParser::parse_string(neg_req), ConfigurationError);
+}
+
+TEST_CASE(backend_container_script_generation) {
+    JobExecutionContext ctx;
+    ctx.job_id = "0001";
+    ctx.job_name = "test_container";
+    ctx.stage_name = "sim";
+    ctx.physical_job_dir = "/tmp/condor/stages/sim/0001";
+    ctx.run_dir = "/tmp/condor";
+    ctx.command = "vcs -sverilog top.sv";
+    ctx.container = ContainerConfig{
+        .image = "synopsys/vcs:2024.09",
+        .backend = "docker",
+        .options = {"--ipc=host", "--net=none"},
+        .mounts = {"/eda/tools:/eda/tools:ro"}
+    };
+
+    std::string script = LocalBackend::generate_runner_script(ctx);
+    ASSERT_TRUE(script.find("docker run") != std::string::npos);
+    ASSERT_TRUE(script.find("--ipc=host") != std::string::npos);
+    ASSERT_TRUE(script.find("--net=none") != std::string::npos);
+    ASSERT_TRUE(script.find("-v \"/eda/tools:/eda/tools:ro\"") != std::string::npos);
+    ASSERT_TRUE(script.find("-v \"/tmp/condor\":\"/tmp/condor\"") != std::string::npos);
+    ASSERT_TRUE(script.find("synopsys/vcs:2024.09") != std::string::npos);
+    ASSERT_TRUE(script.find("vcs -sverilog top.sv") != std::string::npos);
+}
+
+TEST_CASE(parser_container_retry_and_retention_syntax) {
+    std::string yaml_str = R"(
+name: advanced_features_pipeline
+settings:
+  kill_grace_period_sec: 5
+  max_retained_runs: 10
+  purge_successful_logs: true
+defaults:
+  job:
+    retry: 3
+    retry_delay_sec: 2
+    retry_on_exit_codes: [1, 137]
+    container:
+      image: "fedora:40"
+      backend: podman
+stages:
+  - name: stage1
+    jobs:
+      - name: job_inherit
+        command: "ls -la"
+      - name: job_override
+        command: "make test"
+        retry: 1
+        retry_delay_sec: 0
+        container: "alpine:latest"
+)";
+
+    auto config = YamlParser::parse_string(yaml_str);
+    ASSERT_EQ(config.settings.kill_grace_period_sec, 5);
+    ASSERT_EQ(config.settings.max_retained_runs, 10);
+    ASSERT_TRUE(config.settings.purge_successful_logs);
+
+    ASSERT_EQ(config.stages.size(), 1);
+    const auto& s = config.stages[0];
+    ASSERT_EQ(s.jobs.size(), 2);
+
+    const auto& j0 = s.jobs[0];
+    ASSERT_EQ(j0.retry, 3);
+    ASSERT_EQ(j0.retry_delay_sec, 2);
+    ASSERT_EQ(j0.retry_on_exit_codes.size(), 2);
+    ASSERT_EQ(j0.retry_on_exit_codes[0], 1);
+    ASSERT_EQ(j0.retry_on_exit_codes[1], 137);
+    ASSERT_TRUE(j0.container.has_value());
+    ASSERT_EQ(j0.container->image, "fedora:40");
+    ASSERT_EQ(j0.container->backend, "podman");
+
+    const auto& j1 = s.jobs[1];
+    ASSERT_EQ(j1.retry, 1);
+    ASSERT_EQ(j1.retry_delay_sec, 0);
+    ASSERT_TRUE(j1.container.has_value());
+    ASSERT_EQ(j1.container->image, "alpine:latest");
+    ASSERT_EQ(j1.container->backend, "docker");
+}
+
+TEST_CASE(cli_options_validation) {
+    CLI::App app{"test app"};
+    size_t max_runs = 0;
+    app.add_option("--max-retained-runs", max_runs);
+    std::string out_mode;
+    app.add_option("--output-mode", out_mode);
+    std::vector<std::string> res;
+    std::string pipe_file;
+    app.add_option("--define-resource,--resource", res)->allow_extra_args(false);
+    app.add_option("pipeline_file", pipe_file);
+
+    const char* argv[] = {"condor", "--max-retained-runs", "10", "--output-mode", "failures", "--resource", "vcs=4", "pipeline.yaml"};
+    app.parse(8, argv);
+    ASSERT_EQ(max_runs, 10);
+    ASSERT_EQ(out_mode, "failures");
+    ASSERT_EQ(res.size(), 1);
+    ASSERT_EQ(res[0], "vcs=4");
+    ASSERT_EQ(pipe_file, "pipeline.yaml");
 }

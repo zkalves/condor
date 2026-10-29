@@ -219,6 +219,7 @@ void RuntimeMenu::print_help() {
     std::cout << div << "\n"
               << " [s]        Status: Print detailed table of stages & jobs\n"
               << " [p]        Pause / Resume: Toggle dispatching new jobs\n"
+              << " [t <id>]   Tail Log: View recent output (stdout/stderr) for a job\n"
               << " [k <id>]   Kill Job: Terminate active job by job_id\n"
               << " [j <N>]    Scale Slots: Adjust maximum concurrent jobs\n"
               << " [w]        Warranty: Display GNU GPL warranty disclaimer\n"
@@ -253,6 +254,12 @@ void RuntimeMenu::run_menu(Scheduler& scheduler) {
         } else if (cmd == "p" || cmd == "pause") {
             scheduler.toggle_pause();
             break;
+        } else if (cmd == "t" || cmd == "tail") {
+            std::string job_id;
+            iss >> job_id;
+            scheduler.tail_job(job_id);
+            std::cout << "Enter command (or 'c' to continue): " << std::flush;
+            continue;
         } else if (cmd == "k" || cmd == "kill") {
             std::string job_id;
             iss >> job_id;

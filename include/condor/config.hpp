@@ -78,6 +78,17 @@ struct HookConfig {
 };
 
 /**
+ * @struct ContainerConfig
+ * @brief Container virtualization configuration for isolated job/stage execution.
+ */
+struct ContainerConfig {
+    std::string image;                                  ///< Container image name or tag (e.g. "ubuntu:22.04").
+    std::string backend{"docker"};                      ///< Container runtime (docker, podman, singularity, apptainer).
+    std::vector<std::string> options;                   ///< Additional command-line options passed to container run.
+    std::vector<std::string> mounts;                    ///< Volume mount specifications (e.g. "/host:/container:ro").
+};
+
+/**
  * @struct JobDefaults
  * @brief Baseline default properties inherited by stages and jobs to eliminate repetitive YAML configurations.
  */
@@ -92,6 +103,11 @@ struct JobDefaults {
     int timeout_sec{0};                                      ///< Parsed timeout duration in seconds.
     HookConfig hooks;                                        ///< Default lifecycle hooks.
     std::unordered_map<std::string, std::string> variables;  ///< Default variables scoped to this hierarchy level.
+    std::unordered_map<std::string, int> resources;          ///< Default resource tokens required by jobs.
+    int retry{0};                                            ///< Default retry attempts on job failure.
+    int retry_delay_sec{0};                                  ///< Default delay in seconds before retrying a failed job.
+    std::vector<int> retry_on_exit_codes;                    ///< Optional list of exit codes eligible for retry (empty = all).
+    std::optional<ContainerConfig> container;                ///< Default container execution environment.
 };
 
 /**
@@ -124,6 +140,11 @@ struct JobConfig {
     std::optional<int> count;                               ///< Multi-instance count for replicated test execution.
     bool scalable{true};                                    ///< If false, job count is pinned and unaffected by CLI count multiplier.
     std::unordered_map<std::string, std::vector<std::string>> matrix; ///< Matrix parameter sweep variables.
+    std::unordered_map<std::string, int> resources;         ///< Named resource tokens required to execute this job.
+    int retry{0};                                           ///< Number of retry attempts on job failure.
+    int retry_delay_sec{0};                                 ///< Delay in seconds before retrying this job.
+    std::vector<int> retry_on_exit_codes;                   ///< Optional list of exit codes eligible for retry.
+    std::optional<ContainerConfig> container;               ///< Optional container execution environment.
 };
 
 /**
@@ -141,6 +162,7 @@ struct StageConfig {
     std::vector<JobConfig> jobs;          ///< List of jobs configured directly inside this stage.
     std::vector<std::string> includes;    ///< Nested YAML test suite files included into this stage.
     JobDefaults defaults;                 ///< Stage-scoped defaults for jobs in this stage.
+    std::optional<ContainerConfig> container; ///< Optional stage-level container execution environment.
 };
 
 /**
@@ -168,6 +190,9 @@ struct PipelineSettings {
     std::string stage_filter;                             ///< Run only the specified stage if passed via --stage.
     std::string backend_override;                         ///< Force all jobs to use this backend if specified via --backend-override.
     size_t count_multiplier{1};                           ///< Multiplier for scalable job counts (default: 1).
+    int kill_grace_period_sec{3};                         ///< Grace period in seconds between SIGTERM and SIGKILL (default: 3s).
+    size_t max_retained_runs{0};                          ///< Maximum historical runs retained in base_output_dir (0 = unlimited).
+    bool purge_successful_logs{false};                    ///< If true, purge raw log files of passing jobs upon completion.
 };
 
 /**
@@ -184,6 +209,7 @@ struct PipelineConfig {
     HookConfig hooks;                                        ///< Pipeline-level global hooks.
     std::vector<StageConfig> stages;                         ///< List of stages in the DAG.
     std::vector<std::string> includes;                       ///< Global YAML configuration files included at root level.
+    std::unordered_map<std::string, int> resources;          ///< Named resource capacity pools (e.g. license tokens).
 
     /**
      * @brief Finds a stage configuration by name.

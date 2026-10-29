@@ -56,6 +56,9 @@ struct JobExecutionContext {
     std::string test_dir;                                         ///< Pipeline test output directory.
     std::string physical_job_dir;                                 ///< Actual canonical host filesystem path for runner script & chdir.
     std::string working_dir;                                      ///< Optional target execution directory override.
+    std::optional<ContainerConfig> container;                     ///< Optional container virtualization execution wrapper.
+    int kill_grace_period_sec{3};                                 ///< Grace period in seconds between SIGTERM and SIGKILL.
+    double peak_rss_mb{0.0};                                      ///< Peak resident set size (memory) observed in MB.
 
     std::vector<std::pair<std::string, std::string>> env_vars;    ///< Scoped environment variable key-value pairs.
 
@@ -76,6 +79,7 @@ struct PollResult {
     bool finished{false};                 ///< True if the job has finished executing.
     JobStatus status{JobStatus::RUNNING}; ///< Current or final status (RUNNING, PASSED, FAILED, ABORTED).
     int exit_code{0};                     ///< Process or batch exit code if finished.
+    double peak_rss_mb{0.0};              ///< Peak resident set size observed in MB.
 };
 
 /**

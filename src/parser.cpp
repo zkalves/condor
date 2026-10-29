@@ -105,6 +105,35 @@ static void parse_job_deps(const YAML::Node& jnode, JobConfig& job) {
     }
 }
 
+static bool parse_container_node(const YAML::Node& node, ContainerConfig& container) {
+    if (!node) return false;
+    if (node.IsScalar()) {
+        container.image = node.as<std::string>();
+        container.backend = "docker";
+        return true;
+    }
+    if (node.IsMap()) {
+        if (node["image"]) container.image = node["image"].as<std::string>();
+        if (node["backend"]) container.backend = node["backend"].as<std::string>();
+        if (node["options"]) {
+            if (node["options"].IsSequence()) {
+                for (const auto& opt : node["options"]) container.options.push_back(opt.as<std::string>());
+            } else if (node["options"].IsScalar()) {
+                container.options.push_back(node["options"].as<std::string>());
+            }
+        }
+        if (node["mounts"]) {
+            if (node["mounts"].IsSequence()) {
+                for (const auto& m : node["mounts"]) container.mounts.push_back(m.as<std::string>());
+            } else if (node["mounts"].IsScalar()) {
+                container.mounts.push_back(node["mounts"].as<std::string>());
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 static JobDefaults parse_defaults_node(const YAML::Node& node) {
     JobDefaults defs;
     if (!node || !node.IsMap()) return defs;
@@ -124,6 +153,42 @@ static JobDefaults parse_defaults_node(const YAML::Node& node) {
     if (node["variables"] && node["variables"].IsMap()) {
         for (auto it = node["variables"].begin(); it != node["variables"].end(); ++it) {
             defs.variables[it->first.as<std::string>()] = it->second.as<std::string>();
+        }
+    }
+    if (node["resources"] && node["resources"].IsMap()) {
+        for (auto it = node["resources"].begin(); it != node["resources"].end(); ++it) {
+            std::string res_name = it->first.as<std::string>();
+            if (!is_valid_identifier(res_name)) {
+                throw ConfigurationError("Configuration error: Resource name '" + res_name + "' violates identifier rules.");
+            }
+            int count = it->second.as<int>();
+            if (count < 0) {
+                throw ConfigurationError("Configuration error: Resource '" + res_name + "' count cannot be negative.");
+            }
+            defs.resources[res_name] = count;
+        }
+    }
+    if (node["retry"]) {
+        defs.retry = node["retry"].as<int>();
+        if (defs.retry < 0) {
+            throw ConfigurationError("Configuration error: 'retry' count cannot be negative.");
+        }
+    }
+    if (node["retry_delay_sec"]) {
+        defs.retry_delay_sec = node["retry_delay_sec"].as<int>();
+        if (defs.retry_delay_sec < 0) {
+            throw ConfigurationError("Configuration error: 'retry_delay_sec' cannot be negative.");
+        }
+    }
+    if (node["retry_on_exit_codes"] && node["retry_on_exit_codes"].IsSequence()) {
+        for (const auto& item : node["retry_on_exit_codes"]) {
+            defs.retry_on_exit_codes.push_back(item.as<int>());
+        }
+    }
+    if (node["container"]) {
+        ContainerConfig c;
+        if (parse_container_node(node["container"], c)) {
+            defs.container = c;
         }
     }
     return defs;
@@ -169,6 +234,25 @@ static void merge_defaults(JobDefaults& target, const JobDefaults& override_defs
     }
     for (const auto& [k, v] : override_defs.variables) {
         target.variables[k] = v;
+    }
+    for (const auto& [k, v] : override_defs.resources) {
+        if (v == 0) {
+            target.resources.erase(k);
+        } else {
+            target.resources[k] = v;
+        }
+    }
+    if (override_defs.retry > 0) {
+        target.retry = override_defs.retry;
+    }
+    if (override_defs.retry_delay_sec > 0) {
+        target.retry_delay_sec = override_defs.retry_delay_sec;
+    }
+    if (!override_defs.retry_on_exit_codes.empty()) {
+        target.retry_on_exit_codes = override_defs.retry_on_exit_codes;
+    }
+    if (override_defs.container.has_value()) {
+        target.container = override_defs.container;
     }
 }
 
@@ -302,6 +386,60 @@ static void parse_job_entry(const YAML::Node& jnode, StageConfig& stage, int& jo
         if (job_append_args.has_value()) {
             job.append_args = job_append_args;
         }
+        // Inherit default resources
+        for (const auto& [k, v] : defaults.resources) {
+            job.resources[k] = v;
+        }
+        if (jnode["resources"] && jnode["resources"].IsMap()) {
+            for (auto it = jnode["resources"].begin(); it != jnode["resources"].end(); ++it) {
+                std::string rname = it->first.as<std::string>();
+                if (!is_valid_identifier(rname)) {
+                    throw ConfigurationError("Configuration error: Resource name '" + rname + "' violates identifier rules.");
+                }
+                int count = it->second.as<int>();
+                if (count < 0) {
+                    throw ConfigurationError("Configuration error: Resource '" + rname + "' count cannot be negative.");
+                }
+                if (count == 0) {
+                    job.resources.erase(rname);
+                } else {
+                    job.resources[rname] = count;
+                }
+            }
+        }
+
+        // Inherit and override retry policy
+        job.retry = defaults.retry;
+        job.retry_delay_sec = defaults.retry_delay_sec;
+        job.retry_on_exit_codes = defaults.retry_on_exit_codes;
+        if (jnode["retry"]) {
+            job.retry = jnode["retry"].as<int>();
+            if (job.retry < 0) {
+                throw ConfigurationError("Configuration error: 'retry' count cannot be negative.");
+            }
+        }
+        if (jnode["retry_delay_sec"]) {
+            job.retry_delay_sec = jnode["retry_delay_sec"].as<int>();
+            if (job.retry_delay_sec < 0) {
+                throw ConfigurationError("Configuration error: 'retry_delay_sec' cannot be negative.");
+            }
+        }
+        if (jnode["retry_on_exit_codes"] && jnode["retry_on_exit_codes"].IsSequence()) {
+            job.retry_on_exit_codes.clear();
+            for (const auto& item : jnode["retry_on_exit_codes"]) {
+                job.retry_on_exit_codes.push_back(item.as<int>());
+            }
+        }
+
+        // Inherit and override container
+        job.container = defaults.container;
+        if (jnode["container"]) {
+            ContainerConfig c;
+            if (parse_container_node(jnode["container"], c)) {
+                job.container = c;
+            }
+        }
+
         job.scalable = is_scalable;
         job.backend = backend;
         job.working_dir = working_dir;
@@ -551,6 +689,46 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
             config.settings.count_multiplier = s["count_multiplier"].as<size_t>();
             if (config.settings.count_multiplier == 0) config.settings.count_multiplier = 1;
         }
+        if (s["resources"] && s["resources"].IsMap()) {
+            for (auto it = s["resources"].begin(); it != s["resources"].end(); ++it) {
+                std::string rname = it->first.as<std::string>();
+                if (!is_valid_identifier(rname)) {
+                    throw ConfigurationError("Configuration error: Resource name '" + rname +
+                                             "' violates identifier rules (must match POSIX-safe regex ^[a-zA-Z0-9_-]+$).");
+                }
+                int cap = it->second.as<int>();
+                if (cap <= 0) {
+                    throw ConfigurationError("Configuration error: Resource '" + rname + "' capacity must be greater than 0.");
+                }
+                config.resources[rname] = cap;
+            }
+        }
+        if (s["kill_grace_period_sec"]) {
+            config.settings.kill_grace_period_sec = s["kill_grace_period_sec"].as<int>();
+            if (config.settings.kill_grace_period_sec < 0) config.settings.kill_grace_period_sec = 0;
+        }
+        if (s["max_retained_runs"]) {
+            config.settings.max_retained_runs = s["max_retained_runs"].as<size_t>();
+        }
+        if (s["purge_successful_logs"]) {
+            config.settings.purge_successful_logs = s["purge_successful_logs"].as<bool>();
+        }
+    }
+
+    // Parse top-level resources
+    if (root["resources"] && root["resources"].IsMap()) {
+        for (auto it = root["resources"].begin(); it != root["resources"].end(); ++it) {
+            std::string rname = it->first.as<std::string>();
+            if (!is_valid_identifier(rname)) {
+                throw ConfigurationError("Configuration error: Resource name '" + rname +
+                                         "' violates identifier rules (must match POSIX-safe regex ^[a-zA-Z0-9_-]+$).");
+            }
+            int cap = it->second.as<int>();
+            if (cap <= 0) {
+                throw ConfigurationError("Configuration error: Resource '" + rname + "' capacity must be greater than 0.");
+            }
+            config.resources[rname] = cap;
+        }
     }
 
     if (cli_count_multiplier > 0) {
@@ -655,6 +833,13 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         }
         if (snode["enabled_if"]) stage.enabled_if = snode["enabled_if"].as<std::string>();
         if (snode["allow_failure"]) stage.allow_failure = snode["allow_failure"].as<bool>();
+        if (snode["container"]) {
+            ContainerConfig c;
+            if (parse_container_node(snode["container"], c)) {
+                stage.container = c;
+                stage.defaults.container = c;
+            }
+        }
 
         if (snode["depends_on"]) {
             if (snode["depends_on"].IsSequence()) {
@@ -816,6 +1001,57 @@ void YamlParser::validate(const PipelineConfig& config) {
             if (!stage_names.count(dep)) {
                 throw ConfigurationError("Configuration error: Stage '" + stage.name +
                                          "' depends on unknown stage '" + dep + "'.");
+            }
+        }
+    }
+
+    // Verify resource pool capacities and job requests
+    for (const auto& [rname, cap] : config.resources) {
+        if (!is_valid_identifier(rname)) {
+            throw ConfigurationError("Configuration error: Resource pool name '" + rname +
+                                     "' violates identifier rules (must match POSIX-safe regex ^[a-zA-Z0-9_-]+$).");
+        }
+        if (cap <= 0) {
+            throw ConfigurationError("Configuration error: Resource '" + rname + "' capacity must be greater than 0.");
+        }
+    }
+
+    for (const auto& [rname, req] : config.defaults.resources) {
+        auto it = config.resources.find(rname);
+        if (it == config.resources.end()) {
+            throw ConfigurationError("Configuration error: Default resource '" + rname + "' is not defined in pipeline resources.");
+        }
+        if (req > it->second) {
+            throw ConfigurationError("Configuration error: Default resource '" + rname + "' request (" +
+                                     std::to_string(req) + ") exceeds pool capacity (" + std::to_string(it->second) + ").");
+        }
+    }
+
+    for (const auto& stage : config.stages) {
+        for (const auto& [rname, req] : stage.defaults.resources) {
+            auto it = config.resources.find(rname);
+            if (it == config.resources.end()) {
+                throw ConfigurationError("Configuration error: Stage '" + stage.name + "' default resource '" +
+                                         rname + "' is not defined in pipeline resources.");
+            }
+            if (req > it->second) {
+                throw ConfigurationError("Configuration error: Stage '" + stage.name + "' default resource '" +
+                                         rname + "' request (" + std::to_string(req) + ") exceeds pool capacity (" +
+                                         std::to_string(it->second) + ").");
+            }
+        }
+        for (const auto& job : stage.jobs) {
+            for (const auto& [rname, req] : job.resources) {
+                auto it = config.resources.find(rname);
+                if (it == config.resources.end()) {
+                    throw ConfigurationError("Configuration error: Job '" + job.name + "' requests undefined resource '" +
+                                             rname + "'.");
+                }
+                if (req > it->second) {
+                    throw ConfigurationError("Configuration error: Job '" + job.name + "' requests " +
+                                             std::to_string(req) + " units of resource '" + rname +
+                                             "', exceeding total pool capacity of " + std::to_string(it->second) + ".");
+                }
             }
         }
     }

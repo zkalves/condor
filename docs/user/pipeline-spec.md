@@ -1232,3 +1232,186 @@ stages:
 - `{stage_dir}`: Stage directory path
 - `{run_dir}`: Active run root directory
 - `${VAR}`: Any pipeline or host environment variable (e.g. `${SPARK_MASTER}`, `${QUEUE}`)
+
+---
+
+## 11. Named Resource Pools & License Throttling (resources:)
+
+In hardware design (EDA), embedded verification, and specialized compute clusters, execution is frequently constrained by limited resources—such as expensive proprietary compiler licenses (e.g., Synopsys VCS, Cadence Xcelium, Siemens Questa), physical hardware accelerators, or hardware testbenches (FPGA boards, USB instruments).
+
+Condor provides first-class **named resource semaphores** to enforce token limits across concurrent jobs without reducing global job concurrency slots.
+
+### Defining Capacity Pools
+
+Capacity pools are defined either at the top level or under `settings.resources`:
+
+```yaml
+name: asic_verification_pipeline
+
+# Named resource pools and total capacity limits
+resources:
+  vcs_compiler: 4     # Max 4 concurrent compilation / elaboration slots
+  vcs_runtime: 16     # Max 16 concurrent simulation licenses
+  fpga_board: 2       # Max 2 hardware FPGA emulation boards
+```
+
+Capacities can also be overridden or injected from the command line:
+
+```bash
+condor pipeline.yaml --resource vcs_compiler=8 --resource fpga_board=4
+```
+
+### Requesting Resource Tokens
+
+Jobs specify the number of tokens required to dispatch. Jobs can inherit requirements from global or stage defaults, and override or opt out:
+
+```yaml
+defaults:
+  job:
+    resources:
+      vcs_runtime: 1          # Every simulation job defaults to 1 runtime license
+
+stages:
+  - name: compile
+    jobs:
+      - name: elab_top
+        command: "./scripts/compile_top.sh"
+        resources:
+          vcs_compiler: 1     # Requires 1 compiler license
+          vcs_runtime: 0      # Opts out of default runtime license requirement
+
+  - name: sim
+    defaults:
+      resources:
+        vcs_runtime: 2        # Sim stage jobs require 2 runtime licenses by default
+    jobs:
+      - name: test_alu
+        command: "./run_sim +TEST=alu"
+      - name: test_fpga_accel
+        command: "./run_fpga_sim"
+        resources:
+          vcs_runtime: 0
+          fpga_board: 1       # Throttled by available FPGA boards
+```
+
+### Environment Variable Injection
+
+When a job is dispatched with allocated resources, Condor exports dedicated environment variables into the job's execution context (`job_runner.sh`):
+
+- **`CONDOR_RESOURCE_<NAME>`**: Token count allocated to the job (e.g. `CONDOR_RESOURCE_VCS_COMPILER="1"`, `CONDOR_RESOURCE_FPGA_BOARD="1"`).
+- **`CONDOR_RESOURCES`**: Comma-separated list of all assigned resources (e.g. `CONDOR_RESOURCES="vcs_compiler=1,fpga_board=1"`).
+
+---
+
+## 12. Native Container Execution (container:)
+
+Condor supports native containerized job execution without modifying your command scripts. You can isolate stages or individual jobs using Docker, Podman, Singularity, or Apptainer.
+
+### Configuration Syntax
+
+Containers can be specified as a string shorthand (image name) or as a structured object:
+
+```yaml
+defaults:
+  job:
+    container:
+      image: "synopsys/vcs:2024.09"
+      backend: docker               # docker (default), podman, singularity, or apptainer
+      options:
+        - "--ipc=host"
+        - "--net=none"
+      mounts:
+        - "/eda/licenses:/eda/licenses:ro"
+        - "/eda/pdk:/eda/pdk:ro"
+
+stages:
+  - name: lint
+    jobs:
+      - name: verilator_lint
+        command: "verilator --lint-only top.sv"
+        container: "verilator/verilator:latest"   # String shorthand
+```
+
+### Automatic Mounts & Working Directory
+
+When container execution is enabled:
+- The active job directory and the pipeline run directory are automatically mounted into the container.
+- The container working directory (`-w`) is set to the job directory.
+- Container engines automatically receive `--rm` for clean lifecycle cleanup upon exit.
+
+---
+
+## 13. Flaky Test Automatic Retry Policies (retry:)
+
+Verification suites and distributed builds often encounter flaky tests caused by network timeouts, transient license server hiccups, or race conditions. Condor provides built-in automatic retry policies:
+
+```yaml
+defaults:
+  job:
+    retry: 2                        # Maximum retry attempts (default: 0)
+    retry_delay_sec: 5              # Delay before re-dispatching (default: 0)
+    retry_on_exit_codes: [1, 124]   # Specific exit codes to retry (empty = retry all failures)
+
+stages:
+  - name: regression
+    jobs:
+      - name: flaky_pcie_test
+        command: "./run_sim +TEST=pcie"
+        retry: 3
+        retry_delay_sec: 10
+        retry_on_exit_codes: [1, 137]  # Retries on failure (1) or OOM (137)
+```
+
+- **`CONDOR_RETRY_COUNT`**: Condor exports the current attempt number into the job environment (`0` for the initial run, `1` for retry 1, etc.).
+- Retries and back-off delays are evaluated non-blockingly inside the scheduler event loop.
+- Historical attempts and retry counts are preserved in `JobMetadata`, `job_status.yaml`, and the HTML report.
+
+---
+
+## 14. Peak Memory (RSS) Tracking & OOM Diagnostics
+
+Condor continuously monitors job memory consumption in real time without external daemon dependencies:
+
+- On Linux systems, Condor samples `/proc/<pid>/status` (`VmHWM` / `VmRSS`) to record the peak resident set size in megabytes.
+- If a job is terminated by the kernel Out-Of-Memory (OOM) killer or receives `SIGKILL` (exit code 137), Condor logs an explicit diagnostic warning: `exited with code 137 (OOM / SIGKILL)!`.
+- The peak memory usage is reported in:
+  - Real-time tabular dumps (`s` key in the interactive menu, under the `PEAK_RSS` column)
+  - `job_status.txt` and machine-readable `job_status.yaml` (`peak_rss_mb: 512.4`)
+  - The tool-agnostic HTML report (`report.html`) with memory badges and execution diagnostic cards.
+
+---
+
+## 15. Disk Quota & Artifact Retention Policy
+
+Large hardware regression runs can generate massive amounts of log and artifact data. Condor provides settings to automate disk quota management:
+
+```yaml
+settings:
+  # Retain at most 10 recent run directories in base_output_dir (0 = unlimited)
+  max_retained_runs: 10
+
+  # Delete stdout.log, stderr.err, and job_runner.sh for passed jobs
+  purge_successful_logs: true
+```
+
+- **`max_retained_runs`**: At pipeline completion, Condor inspects `base_output_dir` and prunes the oldest historical run directories while preserving the current active run.
+- **`purge_successful_logs`**: Large logs generated by passing jobs are purged from disk immediately after generating the static HTML report. Failing jobs always retain their complete log files for debugging.
+
+---
+
+## 16. Clean Signal Termination Sequence (SIGTERM -> SIGKILL)
+
+To give EDA tools and simulators time to flush database locks, return floating network licenses, and write waveforms, Condor implements a graceful escalation sequence:
+
+```yaml
+settings:
+  # Wait 5 seconds between SIGTERM and SIGKILL during cancellation
+  kill_grace_period_sec: 5
+```
+
+When a job times out, is aborted by user command, or triggers a failure policy:
+1. Condor sends `SIGTERM` to the process group.
+2. Condor waits up to `kill_grace_period_sec` (default: 3 seconds) for processes to terminate cleanly.
+3. If processes remain active after the grace period, `SIGKILL` is sent to force termination.
+
+

@@ -105,11 +105,60 @@ std::string LocalBackend::generate_runner_script(const JobExecutionContext& ctx)
         ss << "fi\n\n";
     }
 
+    std::string run_cmd = ctx.command;
+    if (ctx.container.has_value() && !ctx.container->image.empty()) {
+        const auto& c = *ctx.container;
+        std::string c_backend = c.backend.empty() ? "docker" : c.backend;
+        std::ostringstream c_ss;
+
+        std::string safe_cmd = ctx.command;
+        size_t pos = 0;
+        while ((pos = safe_cmd.find('\'', pos)) != std::string::npos) {
+            safe_cmd.replace(pos, 1, "'\\''");
+            pos += 4;
+        }
+
+        if (c_backend == "singularity" || c_backend == "apptainer") {
+            c_ss << c_backend << " exec";
+            if (!ctx.physical_job_dir.empty()) {
+                c_ss << " --bind \"" << ctx.physical_job_dir << "\":\"" << ctx.physical_job_dir << "\"";
+            }
+            if (!ctx.run_dir.empty() && ctx.run_dir != ".") {
+                c_ss << " --bind \"" << ctx.run_dir << "\":\"" << ctx.run_dir << "\"";
+            }
+            for (const auto& m : c.mounts) {
+                c_ss << " --bind \"" << m << "\"";
+            }
+            for (const auto& opt : c.options) {
+                c_ss << " " << opt;
+            }
+            c_ss << " \"" << c.image << "\" /bin/bash -c '" << safe_cmd << "'";
+        } else {
+            // docker or podman
+            c_ss << c_backend << " run --rm";
+            if (!ctx.physical_job_dir.empty()) {
+                c_ss << " -v \"" << ctx.physical_job_dir << "\":\"" << ctx.physical_job_dir << "\"";
+            }
+            if (!ctx.run_dir.empty() && ctx.run_dir != ".") {
+                c_ss << " -v \"" << ctx.run_dir << "\":\"" << ctx.run_dir << "\"";
+            }
+            c_ss << " -w \"" << target_cd << "\"";
+            for (const auto& m : c.mounts) {
+                c_ss << " -v \"" << m << "\"";
+            }
+            for (const auto& opt : c.options) {
+                c_ss << " " << opt;
+            }
+            c_ss << " \"" << c.image << "\" /bin/bash -c '" << safe_cmd << "'";
+        }
+        run_cmd = c_ss.str();
+    }
+
     ss << "# --- Main Command ---\n"
        << "echo \"[CONDOR RUNNER] Executing command:\"\n"
        << "echo \"  " << ctx.command << "\"\n"
        << "echo \"\"\n"
-       << ctx.command << "\n"
+       << run_cmd << "\n"
        << "CMD_STATUS=$?\n\n";
 
     if (!ctx.post_hook.empty()) {
@@ -247,15 +296,31 @@ void LocalBackend::submit(JobExecutionContext& ctx) {
 
 PollResult LocalBackend::poll(JobExecutionContext& ctx) {
     if (ctx.pid <= 0) {
-        return {true, JobStatus::FAILED, -1};
+        return {true, JobStatus::FAILED, -1, ctx.peak_rss_mb};
     }
 
     int status = 0;
     pid_t ret = waitpid(ctx.pid, &status, WNOHANG);
 
     if (ret == 0) {
-        // Still running
-        return {false, JobStatus::RUNNING, 0};
+        // Still running: sample memory usage from /proc/<pid>/status
+        std::ifstream proc_status("/proc/" + std::to_string(ctx.pid) + "/status");
+        if (proc_status) {
+            std::string line;
+            while (std::getline(proc_status, line)) {
+                if (line.rfind("VmHWM:", 0) == 0 || line.rfind("VmRSS:", 0) == 0) {
+                    std::istringstream iss(line.substr(6));
+                    long long kb = 0;
+                    if (iss >> kb && kb > 0) {
+                        double mb = static_cast<double>(kb) / 1024.0;
+                        if (mb > ctx.peak_rss_mb) {
+                            ctx.peak_rss_mb = mb;
+                        }
+                    }
+                }
+            }
+        }
+        return {false, JobStatus::RUNNING, 0, ctx.peak_rss_mb};
     } else if (ret == ctx.pid) {
         // Child exited
         ctx.end_time = std::chrono::steady_clock::now();
@@ -273,29 +338,49 @@ PollResult LocalBackend::poll(JobExecutionContext& ctx) {
 
         ctx.exit_code = exit_code;
         ctx.status = js;
-        return {true, js, exit_code};
+        return {true, js, exit_code, ctx.peak_rss_mb};
     } else if (ret < 0) {
         if (errno == ECHILD) {
             // Already reaped
             ctx.end_time = std::chrono::steady_clock::now();
-            return {true, ctx.status, ctx.exit_code};
+            return {true, ctx.status, ctx.exit_code, ctx.peak_rss_mb};
         }
-        return {true, JobStatus::FAILED, -1};
+        return {true, JobStatus::FAILED, -1, ctx.peak_rss_mb};
     }
 
-    return {false, JobStatus::RUNNING, 0};
+    return {false, JobStatus::RUNNING, 0, ctx.peak_rss_mb};
 }
 
 void LocalBackend::cancel(JobExecutionContext& ctx) {
     if (ctx.pid > 0) {
         CONDOR_LOG_DEBUG("Cancelling job " + ctx.job_id + " (PGID: " + std::to_string(ctx.pid) + ")");
-        // Send SIGTERM to entire process group (-pid)
+        // 1. Send SIGTERM to entire process group (-pid) to allow graceful cleanup
         kill(-ctx.pid, SIGTERM);
-        usleep(50000); // 50ms grace period
-        kill(-ctx.pid, SIGKILL);
 
-        int status = 0;
-        waitpid(ctx.pid, &status, WNOHANG);
+        int grace_ms = std::max(0, ctx.kill_grace_period_sec) * 1000;
+        if (grace_ms == 0) grace_ms = 50;
+
+        int elapsed_ms = 0;
+        bool exited = false;
+        while (elapsed_ms < grace_ms) {
+            int status = 0;
+            pid_t ret = waitpid(ctx.pid, &status, WNOHANG);
+            if (ret == ctx.pid || (ret < 0 && errno == ECHILD)) {
+                exited = true;
+                break;
+            }
+            usleep(50000); // 50ms check
+            elapsed_ms += 50;
+        }
+
+        // 2. Escalate to SIGKILL if process group has not exited
+        if (!exited) {
+            CONDOR_LOG_DEBUG("Job " + ctx.job_id + " did not exit within grace period (" +
+                             std::to_string(ctx.kill_grace_period_sec) + "s); escalating to SIGKILL.");
+            kill(-ctx.pid, SIGKILL);
+            int status = 0;
+            waitpid(ctx.pid, &status, WNOHANG);
+        }
 
         ctx.status = JobStatus::ABORTED;
         ctx.exit_code = 137;

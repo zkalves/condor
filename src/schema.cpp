@@ -54,6 +54,14 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
         "type": ["string", "number", "boolean"]
       }
     },
+    "resources": {
+      "type": "object",
+      "description": "Named resource capacity pools (e.g. license tokens, hardware accelerators)",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
     "settings": {
       "type": "object",
       "description": "Runtime execution options and settings",
@@ -128,6 +136,28 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
         "junit_xml_path": {
           "type": "string",
           "description": "Custom destination path for junit_report.xml"
+        },
+        "resources": {
+          "type": "object",
+          "description": "Named resource capacity pools (e.g. license tokens, hardware accelerators)",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "kill_grace_period_sec": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Grace period in seconds between SIGTERM and SIGKILL during job termination"
+        },
+        "max_retained_runs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum historical run directories to retain in base_output_dir"
+        },
+        "purge_successful_logs": {
+          "type": "boolean",
+          "description": "Purge raw stdout/stderr logs of passed jobs upon completion"
         }
       },
       "additionalProperties": false
@@ -148,6 +178,30 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
           "type": "object",
           "additionalProperties": { "type": ["string", "number", "boolean"] }
         },
+        "resources": {
+          "type": "object",
+          "description": "Named resource tokens required to execute this job",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "retry": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of retry attempts on job failure"
+        },
+        "retry_delay_sec": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Delay in seconds before retrying a failed job"
+        },
+        "retry_on_exit_codes": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "description": "List of exit codes eligible for retry"
+        },
+        "container": { "$ref": "#/definitions/ContainerConfig" },
         "stage": {
           "type": "object",
           "properties": {
@@ -169,7 +223,31 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
             "variables": {
               "type": "object",
               "additionalProperties": { "type": ["string", "number", "boolean"] }
-            }
+            },
+            "resources": {
+              "type": "object",
+              "description": "Default resource tokens required by jobs",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "retry": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of retry attempts on job failure"
+            },
+            "retry_delay_sec": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Delay in seconds before retrying a failed job"
+            },
+            "retry_on_exit_codes": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "List of exit codes eligible for retry"
+            },
+            "container": { "$ref": "#/definitions/ContainerConfig" }
           },
           "additionalProperties": false
         }
@@ -205,6 +283,28 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
     }
   },
   "definitions": {
+    "ContainerConfig": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "required": ["image"],
+          "properties": {
+            "image": { "type": "string" },
+            "backend": { "type": "string", "enum": ["docker", "podman", "singularity", "apptainer"] },
+            "options": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "mounts": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "HookConfig": {
       "type": "object",
       "properties": {
@@ -247,6 +347,7 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
             { "type": "array", "items": { "type": "string" } }
           ]
         },
+        "container": { "$ref": "#/definitions/ContainerConfig" },
         "hooks": { "$ref": "#/definitions/HookConfig" },
         "include": {
           "oneOf": [
@@ -269,6 +370,30 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
               "type": "object",
               "additionalProperties": { "type": ["string", "number", "boolean"] }
             },
+            "resources": {
+              "type": "object",
+              "description": "Default resource tokens required by jobs",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "retry": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of retry attempts on job failure"
+            },
+            "retry_delay_sec": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Delay in seconds before retrying a failed job"
+            },
+            "retry_on_exit_codes": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "List of exit codes eligible for retry"
+            },
+            "container": { "$ref": "#/definitions/ContainerConfig" },
             "job": {
               "type": "object",
               "properties": {
@@ -283,6 +408,14 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
                 "variables": {
                   "type": "object",
                   "additionalProperties": { "type": ["string", "number", "boolean"] }
+                },
+                "resources": {
+                  "type": "object",
+                  "description": "Default resource tokens required by jobs",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
                 }
               },
               "additionalProperties": false
@@ -319,10 +452,34 @@ static constexpr std::string_view PIPELINE_SCHEMA_JSON = R"json({
             { "type": "array", "items": { "type": "string" } }
           ]
         },
+        "container": { "$ref": "#/definitions/ContainerConfig" },
         "hooks": { "$ref": "#/definitions/HookConfig" },
         "variables": {
           "type": "object",
           "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "resources": {
+          "type": "object",
+          "description": "Named resource tokens required to execute this job",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "retry": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of retry attempts on job failure"
+        },
+        "retry_delay_sec": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Delay in seconds before retrying a failed job"
+        },
+        "retry_on_exit_codes": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "description": "List of exit codes eligible for retry"
         },
         "count": { "type": "integer", "minimum": 1 },
         "matrix": {
