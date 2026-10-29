@@ -144,3 +144,35 @@ Every job runner script (`job_runner.sh`) and hook script receives the following
 | `CONDOR_RESOURCES` | Comma-separated list of allocated resources and counts | `vcs=1,fpga=1` | `vcs=1,fpga=1` |
 | `CONDOR_RETRY_COUNT` | Current retry attempt number (0 for initial run, 1 for first retry) | `0` | `0` |
 | `CONDOR_VAR_<KEY>` | Exported user and configuration variables | Varies | Varies |
+
+---
+
+## Condor Hub CLI Reference (condor-hub)
+
+`condor-hub` is the central reporting server and remote control plane executable. It accepts incoming WebSocket telemetry connections from Condor runners and serves the real-time web dashboard.
+
+### Command Line Syntax
+
+```bash
+condor-hub [OPTIONS]
+```
+
+### Options
+
+| Option | Argument | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `-p`, `--port` | `<port>` | `8080` | Port to listen on for HTTP web dashboard and WebSocket connections. |
+| `-H`, `--host` | `<host>` | `0.0.0.0` | Host or network interface address to bind. |
+| `-t`, `--token`| `<token>`| *(empty)* | Optional Bearer authorization token for client and dashboard authentication. |
+| `-w`, `--workers`| `<N>` | `4` | Worker thread count for epoll connection handling. |
+| `-h`, `--help` | None (Flag) | None | Display command-line usage information and exit. |
+
+### Running Condor Hub
+
+```bash
+# Start server with default settings (http://0.0.0.0:8080)
+condor-hub
+
+# Bind to localhost on custom port with authentication token
+condor-hub --host 127.0.0.1 --port 9090 --token secret123
+```

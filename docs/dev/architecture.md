@@ -91,12 +91,35 @@ classDiagram
         +generate(PipelineConfig&, WorkspaceManager&, ...) string$
     }
 
+    class RemoteServerClient {
+        -ServerConfig config_
+        -atomic_bool running_
+        -atomic_bool connected_
+        +start() void
+        +stop() void
+        +send_telemetry(json) void
+        +send_event(string, json) void
+        +set_command_handler(cb) void
+    }
+
+    class HubServer {
+        -HubConfig config_
+        -FleetManager fleet_manager_
+        -atomic_bool running_
+        +start() bool
+        +stop() void
+        -event_loop() void
+        -handle_socket_read() void
+    }
+
     ExecutionBackend <|-- LocalBackend
     ExecutionBackend <|-- TemplateBackend
     Scheduler --> WorkspaceManager
     Scheduler --> ProgressDisplay
     Scheduler --> ExecutionBackend
     Scheduler --> HtmlReportGenerator
+    Scheduler --> RemoteServerClient
+    HubServer --> FleetManager
     YamlParser --> VariableManager
     YamlParser --> ExpressionEvaluator
 ```
@@ -132,3 +155,13 @@ Responsible for reading, expanding, and validating pipeline definitions:
 ### Subsystem 6: Progress & Interactive Reporting (src/progress.cpp, src/html_report.cpp)
 - **`ProgressDisplay`**: Queries terminal column dimensions dynamically via `ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws)`. Renders multi-track progress bars with ANSI color escapes. Supports non-interactive periodic CI logging and output filtering (`all`, `failures`, `summary`).
 - **`HtmlReportGenerator`**: Compiles the zero-dependency interactive `artifacts/report.html` report with embedded CSS, JavaScript, stage navigation bars, custom machine metrics extraction, and embedded log viewers.
+
+### Subsystem 7: Remote Client Engine (include/condor/remote_client.hpp, src/remote_client.cpp)
+- **`RemoteServerClient`**: Thread-safe asynchronous client communicating with a central reporting server over WebSocket (RFC 6455) or HTTP POST fallback. Operates a background worker thread with a thread-safe outbound message queue (`outbound_queue_`).
+- **Bidirectional Event & Command Dispatch**: Dispatches events (`pipeline_started`, `job_started`, `job_finished`, `pipeline_aborted`, `pipeline_finished`) and streams real-time telemetry frames. Listens for incoming remote commands (`pause`, `resume`, `abort`, `kill_job`, `scale_slots`) and delegates them to the `Scheduler` via callbacks.
+- **Offline Invariant**: Completely disabled unless explicitly configured in YAML (`settings.server.enabled: true`) or CLI (`--server-url`). When disabled, no worker thread is created and no network operations are performed.
+
+### Subsystem 8: Condor Hub Server (server/include/hub/, server/src/)
+- **`HubServer` (`server/include/hub/server.hpp`, `server/src/server.cpp`)**: Asynchronous socket server utilizing Linux `epoll` and `eventfd` wakeup. Manages non-blocking TCP sockets, HTTP requests, and WebSocket handshakes (`compute_websocket_accept` in `crypto.hpp`).
+- **`FleetManager` (`server/include/hub/fleet_manager.hpp`, `server/src/fleet_manager.cpp`)**: Thread-safe registry and state machine tracking active and completed pipeline runs (`RunRecord`), active jobs (`ActiveJobRecord`), stage progression, and connected dashboard WebSocket clients.
+- **Embedded Web Dashboard (`server/include/hub/dashboard_html.hpp`)**: Single-page dark-mode dashboard served from memory with zero asset file dependencies. Visualizes live fleet metrics, active worker PIDs, and provides interactive control buttons.

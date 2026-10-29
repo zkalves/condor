@@ -33,6 +33,10 @@ flowchart TD
     
     SCHED --> REPORT["HtmlReportGenerator\n(src/html_report.cpp)"]
     REPORT --> HTML["artifacts/report.html\n(Zero-Dependency Interactive Report)"]
+
+    SCHED --> REMOTE["RemoteServerClient\n(src/remote_client.cpp)"]
+    REMOTE -.->|WebSocket / HTTP| HUB["Condor Hub (condor-hub)\n(server/src/server.cpp)"]
+    HUB --> DASH["Web Dashboard\n(http://localhost:8080/)"]
 ```
 
 ---
@@ -131,3 +135,47 @@ This architecture ensures that any verification failure can be reproduced instan
 Condor automates artifact passing between compilation and testing stages:
 - **Build Stage Discovery**: When a stage depends on a build stage (any stage containing `"build"` in its name or the first declared dependency), the scheduler discovers the build job directory and injects its path as `${BUILD_DIR}` and `${CONDOR_BUILD_DIR}` into dependent test jobs.
 - **Relative Path Resolution**: When `path_style: relative` is configured, Condor computes relative filesystem paths (`../../build_rtl/0001`), ensuring that build artifacts can be referenced portably without hardcoded absolute paths.
+
+---
+
+## 6. Remote Telemetry & Fleet Control Architecture (`condor-hub`)
+
+Condor includes a standalone reporting and control plane designed for high-concurrency fleet monitoring:
+
+```mermaid
+flowchart LR
+    subgraph Runners ["Condor Runner Clients"]
+        R1["Condor Runner 1\n(ASIC Top)"]
+        R2["Condor Runner 2\n(Unit Tests)"]
+        RN["Condor Runner N\n(Verilator ALU)"]
+    end
+
+    subgraph Hub ["Condor Hub Server (condor-hub)"]
+        EPOLL["Linux epoll Event Loop\n(Async Non-Blocking Sockets)"]
+        FM["FleetManager\n(Run & Connection State Store)"]
+        STATIC["Embedded Dashboard\n(HTML/CSS/JS Single-Page)"]
+    end
+
+    subgraph Clients ["Web & Dashboard Clients"]
+        BROWSER["Web Browser\n(http://localhost:8080/)"]
+    end
+
+    R1 -->|WebSocket RFC 6455| EPOLL
+    R2 -->|WebSocket RFC 6455| EPOLL
+    RN -->|WebSocket RFC 6455| EPOLL
+
+    EPOLL <--> FM
+    FM <--> STATIC
+
+    STATIC -->|HTTP GET /| BROWSER
+    FM -->|WebSocket /ws/dashboard| BROWSER
+    BROWSER -->|REST POST /control| EPOLL
+```
+
+### Architectural Properties
+1. **Zero External Networking Dependencies**:
+   Both `RemoteServerClient` and `HubServer` are written in pure C++20 utilizing POSIX sockets, `epoll`, and standard library components without Boost, libcurl, or libwebsockets.
+2. **Offline-First Safety Guarantee**:
+   When `server:` is omitted from the pipeline configuration and `--server-url` is not specified on the CLI, the client operates 100% offline with zero network attempts and zero background telemetry threads.
+3. **Bidirectional Control Loop**:
+   The WebSocket channel allows runners to stream live telemetry (job states, PIDs, elapsed runtimes, peak RSS) while listening for server commands (pause, resume, abort, kill job, scale worker slots) dispatched from the central dashboard.

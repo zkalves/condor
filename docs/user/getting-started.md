@@ -304,7 +304,39 @@ xdg-open ./condor_runs/latest/artifacts/report.html
 
 ---
 
-## 5. Next Steps
+## 5. Running with Condor Hub (Central Reporting & Remote Control Plane)
+
+Condor includes **Condor Hub** (`condor-hub`), a standalone C++20 socket server that provides centralized real-time telemetry streaming and bidirectional remote control across runners.
+
+### Step 1: Start the Condor Hub Server
+
+```bash
+# Start Condor Hub on http://0.0.0.0:8080 (or use 'make run-server')
+condor-hub --port 8080
+```
+
+Open [`http://localhost:8080/`](http://localhost:8080/) in your web browser. You will see the live dark-mode fleet dashboard ready to receive pipeline runners.
+
+### Step 2: Execute Pipelines with Server Reporting
+
+Run any pipeline with `--server-url`:
+
+```bash
+# Run simple pipeline reporting to the Hub
+condor examples/simple/scripts/pipeline.yaml --server-url ws://localhost:8080/api/v1/ws
+
+# Run Verilator hardware verification with tags and project name
+condor examples/verilator/scripts/pipeline.yaml \
+    --server-url ws://localhost:8080/api/v1/ws \
+    --server-project "Verilator ALU" \
+    --server-tags "rtl,sim"
+```
+
+From the web dashboard, you can monitor stage progression live and interactively pause/resume execution or abort runaway jobs remotely.
+
+---
+
+## 6. Next Steps
 
 - Consult the [Supported Operating Systems & Compatibility Matrix Guide](@ref supported_os) for enterprise packaging and container deployment.
 - Explore the [CLI Reference](@ref cli_reference) for all command-line options and execution modifiers.
