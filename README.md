@@ -47,6 +47,12 @@
 - **Pluggable Execution Backends**:
   - `LocalBackend`: Direct POSIX process group execution (`fork()`, `setpgid()`, `chdir()`, `dup2()`, non-blocking `waitpid(WNOHANG)`)
   - `TemplateBackend`: Modular, non-hardcoded grid execution loaded dynamically from YAML definition files (Slurm, Grid Engine Family [SGE/AGE/OGS], IBM Spectrum LSF, PBS Professional & TORQUE, Apache Spark) with parameter placeholders (`{job_id}`, `{script}`, `{grid_id}`) and status pattern matching. Discover backends with `condor --list-backends`.
+- **Condor Hub & Remote Fleet Control Plane**:
+  - Standalone pure C++20 Linux `epoll` server (`condor-hub`) supporting high-concurrency WebSocket channels (RFC 6455) and REST endpoints with zero external dependencies
+  - Real-time pipeline telemetry streaming (DAG stage progression, active jobs, worker PIDs, elapsed runtime, and peak RSS)
+  - Embedded dark-mode single-page HTML/CSS/JS dashboard (`http://localhost:8080/`)
+  - Bidirectional remote controls: Pause, Resume, Abort Pipeline, Kill Runaway Job, and dynamic concurrency scaling
+  - 100% offline-safe guarantee: zero network connections attempted unless explicitly enabled via YAML `server:` or CLI `--server-url`
 
 ---
 
@@ -154,6 +160,32 @@ ctest --test-dir build --output-on-failure
 
 ---
 
+## Condor Hub (Central Reporting & Remote Control Plane)
+
+**Condor Hub** is an asynchronous C++20 Linux `epoll` socket server providing centralized real-time fleet orchestration, WebSocket telemetry streaming, and bidirectional remote control across distributed Condor runners.
+
+### Features
+- **Zero External Networking Dependencies**: Built entirely with standard Linux POSIX sockets, `epoll`, `eventfd`, and RFC 6455 WebSocket framing.
+- **Embedded Dark-Mode Web Dashboard**: Served directly from memory at `http://localhost:8080/` with live DAG progress bars, active worker PID/RSS tracking, and event logs.
+- **Bidirectional Remote Control**: Pause/Resume pipeline dispatching, abort individual runs, terminate runaway jobs, or scale worker slots on the fly.
+- **Offline Safety Guarantee**: Condor operates 100% offline with zero network attempts unless explicitly enabled via YAML `settings.server` or CLI `--server-url`.
+
+### Quick Start with Make Flows
+```bash
+# Terminal 1: Build & start the Condor Hub server (default: port 8080)
+make build-server
+make run-server HUB_PORT=8080
+
+# Terminal 2: Run pipelines connected to the Hub
+make run-remote                               # Simple example pipeline
+make run-verilator-remote                     # Hardware ALU simulation & tests
+make run-verilator-coverage-remote            # Hardware ALU with coverage analysis
+```
+
+Open [`http://localhost:8080/`](http://localhost:8080/) in your web browser to monitor and control your pipeline runs in real time.
+
+---
+
 ## Documentation
 
 Condor features a comprehensive interactive HTML documentation portal styled with Solarized Dark and Doxygen-Awesome:
@@ -199,6 +231,24 @@ OPTIONS:
   --dry-run                   Validate names, DAG cycles, evaluate conditions, print plan, and exit
   --no-interactive            Disable interactive stdin polling and ANSI progress redraws
   --verbose-logging           Enable detailed scheduler event logging
+  --server-url <url>          Central telemetry and control server URL (e.g. ws://localhost:8080/api/v1/ws)
+  --server-token <token>      Bearer authorization token for central server
+  --server-project <name>     Logical project name for categorization
+  --server-tags <tag>         Categorization tags (repeatable)
+  --server-poll-ms <ms>       Telemetry streaming and poll interval in ms (default: 500)
+```
+
+### Condor Hub Server CLI
+
+```
+Syntax: condor-hub [OPTIONS]
+
+OPTIONS:
+  -p, --port <port>           Listening port for HTTP dashboard and WebSocket (default: 8080)
+  -H, --host <host>           Host or network interface to bind (default: 0.0.0.0)
+  -t, --token <token>         Optional Bearer authentication token
+  -w, --workers <N>           Worker thread count for connection handling (default: 4)
+  -h, --help                  Print help message and exit
 ```
 
 ---
@@ -219,6 +269,11 @@ settings:
   on_failure_action: "abort"
   path_style: "relative"  # "absolute" (default) or "relative" (portable relative paths inside runs)
   backend: "local"        # "local", "slurm", "lsf", "sge", "pbs", "spark"
+  server:                 # Optional: stream telemetry to Condor Hub (default: offline)
+    enabled: true
+    url: "ws://localhost:8080/api/v1/ws"
+    project: "build_and_test"
+    tags: ["ci", "regression"]
 
 defaults:
   command: "pytest tests/ --test=${TEST_NAME}"

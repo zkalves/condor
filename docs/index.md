@@ -49,15 +49,16 @@ docs/
 - **Dynamic Terminal Width & Responsive Progress**: Real-time multi-bar ANSI progress visualizer with dynamic terminal width detection (`TIOCGWINSZ`), status summaries, and interactive keyboard menu (`p` pause, `r` resume, `k` kill, `q` quit).
 - **Self-Contained Interactive HTML Report**: Automatically generates an embedded, offline-ready `report.html` with per-stage tabbed navigation, stage progression bars, custom machine metrics parsing, embedded log inspectors, search, and deep-linking.
 - **Extensible Distributed Grid Backends**: Dynamic, non-hardcoded grid execution system with parameterized command templates (`{script}`, `{grid_id}`, `{job_dir}`) and out-of-the-box definitions for Slurm (`sbatch`), Grid Engine Family (Sun Grid Engine / Altair / Open Grid Scheduler), IBM Spectrum LSF (`bsub`), PBS Professional & TORQUE (`qsub`), and Apache Spark (`spark-submit`). Discover all backends via `condor --list-backends`.
+- **Condor Hub Central Orchestrator & Live Web Dashboard**: Standalone pure C++20 Linux socket server (`condor-hub`) providing real-time WebSocket telemetry, interactive dark-mode browser dashboard (`http://localhost:8080/`), and bidirectional control plane (pause/resume, abort, kill job, concurrency scaling) with zero external networking dependencies.
 
 ---
 
 ## ⚡ Quick Start
 
-@note Ensure `condor` is in your `PATH` (e.g. via `sudo make install` or by adding the installation directory to your `PATH`). All Condor commands should be executed directly via `condor`.
+@note Ensure `condor` and `condor-hub` are in your `PATH` (e.g. via `sudo make install` or by adding the installation directory to your `PATH`). All Condor commands should be executed directly via `condor`.
 
 ```bash
-# 1. Build and install Condor
+# 1. Build and install Condor and Condor Hub
 make build
 sudo make install
 
@@ -67,11 +68,17 @@ make test-verbose
 # 3. Validate pipeline configuration without executing
 condor examples/simple/scripts/pipeline.yaml --dry-run
 
-# 4. Execute the pipeline
+# 4. Execute the pipeline locally (100% offline)
 condor examples/simple/scripts/pipeline.yaml
 
 # 5. Run with summary terminal output and portable relative paths
 condor examples/conditional/scripts/pipeline.yaml --relative-paths --output-mode=summary
+
+# 6. Start the Condor Hub reporting server & web dashboard
+make run-server HUB_PORT=8080
+
+# 7. Execute pipeline streaming telemetry to Condor Hub
+condor examples/verilator/scripts/pipeline.yaml --server-url ws://localhost:8080/api/v1/ws
 ```
 
 ---
