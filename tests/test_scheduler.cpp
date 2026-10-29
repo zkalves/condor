@@ -18,6 +18,7 @@
  */
 
 #include "condor/scheduler.hpp"
+#include "condor/menu.hpp"
 #include "condor/parser.hpp"
 #include <filesystem>
 #include <fstream>

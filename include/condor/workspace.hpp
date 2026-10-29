@@ -137,6 +137,18 @@ public:
     std::string run_id() const { return run_dir_.filename().string(); }
 
     /**
+     * @brief Gets the filesystem path for the emergency kill script (`<run_dir>/kill_jobs.sh`).
+     * @return Path to `<run_dir>/kill_jobs.sh`.
+     */
+    std::filesystem::path kill_script_path() const { return run_dir_ / "kill_jobs.sh"; }
+
+    /**
+     * @brief Gets the filesystem path for active process IDs file (`<run_dir>/active_pids.txt`).
+     * @return Path to `<run_dir>/active_pids.txt`.
+     */
+    std::filesystem::path active_pids_path() const { return run_dir_ / "active_pids.txt"; }
+
+    /**
      * @brief Gets the filesystem path for the pipeline artifacts directory (`<run_dir>/artifacts`).
      * @return Path to `<run_dir>/artifacts`.
      */
@@ -214,11 +226,38 @@ public:
      */
     static std::string generate_run_folder_name();
 
+    /**
+     * @brief Records an active job PID into `<run_dir>/active_pids.txt`.
+     * @param pid Process ID of launched job.
+     */
+    void record_active_pid(int pid);
+
+    /**
+     * @brief Removes a completed or canceled job PID from `<run_dir>/active_pids.txt`.
+     * @param pid Process ID of finished job.
+     */
+    void remove_active_pid(int pid);
+
+    /**
+     * @brief Reads all currently active job PIDs for this run.
+     * @return Vector of active PIDs.
+     */
+    std::vector<int> get_active_pids() const;
+
+    /**
+     * @brief Emergency terminates all active jobs in the specified run directory.
+     * @param target_dir Run directory path.
+     */
+    static void kill_run(const std::filesystem::path& target_dir);
+
 private:
+    void create_kill_script();
+
     std::filesystem::path base_dir_;
     std::filesystem::path run_dir_;
     bool is_fixed_{false};
     mutable std::mutex manifest_mutex_;
+    mutable std::mutex pid_mutex_;
 };
 
 } // namespace condor

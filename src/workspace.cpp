@@ -24,6 +24,8 @@
 #include <iomanip>
 #include <sstream>
 #include <unistd.h>
+#include <signal.h>
+#include <cstdlib>
 
 namespace condor {
 
@@ -66,6 +68,8 @@ void WorkspaceManager::initialize() {
     std::filesystem::create_directories(artifacts_dir(), ec);
     std::filesystem::create_directories(pipeline_dir(), ec);
     std::filesystem::create_directories(stages_dir(), ec);
+
+    create_kill_script();
 
     if (!is_fixed_) {
         update_latest_symlink();
@@ -237,6 +241,157 @@ void WorkspaceManager::prune_old_runs(size_t max_retained) {
         CONDOR_LOG_DEBUG("Pruning old run directory: " + oldest.string());
         std::filesystem::remove_all(oldest, ec);
     }
+}
+
+void WorkspaceManager::create_kill_script() {
+    std::error_code ec;
+    auto script_path = kill_script_path();
+    std::ofstream out(script_path, std::ios::trunc);
+    if (!out) {
+        CONDOR_LOG_WARN("Could not create emergency kill script: " + script_path.string());
+        return;
+    }
+
+    out << "#!/usr/bin/env bash\n"
+        << "# ==============================================================================\n"
+        << "# Condor Emergency Job Cleanup Script\n"
+        << "# Run Directory: " << run_dir_.string() << "\n"
+        << "# ==============================================================================\n"
+        << "set -uo pipefail\n\n"
+        << "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
+        << "PID_FILE=\"${SCRIPT_DIR}/active_pids.txt\"\n\n"
+        << "if [ ! -f \"${PID_FILE}\" ]; then\n"
+        << "    echo \"[CONDOR CLEANUP] No active_pids.txt found in ${SCRIPT_DIR}.\"\n"
+        << "    exit 0\n"
+        << "fi\n\n"
+        << "PIDS=$(cat \"${PID_FILE}\" 2>/dev/null | tr '\\n' ' ' || true)\n"
+        << "if [ -z \"${PIDS// /}\" ]; then\n"
+        << "    echo \"[CONDOR CLEANUP] No active job PIDs recorded for this run.\"\n"
+        << "    exit 0\n"
+        << "fi\n\n"
+        << "echo \"[CONDOR CLEANUP] Terminating active jobs for run in ${SCRIPT_DIR}...\"\n\n"
+        << "# 1. Send SIGTERM to each process group (-PID) and individual PID\n"
+        << "for PID in ${PIDS}; do\n"
+        << "    if [ -n \"${PID}\" ] && kill -0 \"${PID}\" 2>/dev/null; then\n"
+        << "        echo \"[CONDOR CLEANUP] Sending SIGTERM to process group -${PID}...\"\n"
+        << "        kill -TERM -\"${PID}\" 2>/dev/null || kill -TERM \"${PID}\" 2>/dev/null || true\n"
+        << "    fi\n"
+        << "done\n\n"
+        << "# 2. Wait up to 3 seconds grace period\n"
+        << "for i in 1 2 3; do\n"
+        << "    STILL_RUNNING=0\n"
+        << "    for PID in ${PIDS}; do\n"
+        << "        if [ -n \"${PID}\" ] && kill -0 \"${PID}\" 2>/dev/null; then\n"
+        << "            STILL_RUNNING=1\n"
+        << "            break\n"
+        << "        fi\n"
+        << "    done\n"
+        << "    if [ \"${STILL_RUNNING}\" -eq 0 ]; then\n"
+        << "        break\n"
+        << "    fi\n"
+        << "    sleep 1\n"
+        << "done\n\n"
+        << "# 3. Escalate to SIGKILL for any remaining stubborn processes\n"
+        << "for PID in ${PIDS}; do\n"
+        << "    if [ -n \"${PID}\" ] && kill -0 \"${PID}\" 2>/dev/null; then\n"
+        << "        echo \"[CONDOR CLEANUP] Escalating to SIGKILL for process group -${PID}...\"\n"
+        << "        kill -KILL -\"${PID}\" 2>/dev/null || kill -KILL \"${PID}\" 2>/dev/null || true\n"
+        << "    fi\n"
+        << "done\n\n"
+        << "# Also clean up any lingering processes matching this run directory path\n"
+        << "pkill -f \"${SCRIPT_DIR}/stages\" 2>/dev/null || true\n\n"
+        << "> \"${PID_FILE}\"\n"
+        << "echo \"[CONDOR CLEANUP] All active jobs terminated successfully.\"\n";
+
+    out.close();
+
+    // Make script executable (chmod 0755)
+    std::filesystem::permissions(script_path,
+        std::filesystem::perms::owner_all |
+        std::filesystem::perms::group_read | std::filesystem::perms::group_exec |
+        std::filesystem::perms::others_read | std::filesystem::perms::others_exec,
+        std::filesystem::perm_options::replace, ec);
+
+    // Initialize empty active_pids.txt
+    std::ofstream pid_out(active_pids_path(), std::ios::trunc);
+}
+
+void WorkspaceManager::record_active_pid(int pid) {
+    if (pid <= 0) return;
+    std::lock_guard<std::mutex> lock(pid_mutex_);
+    std::ofstream out(active_pids_path(), std::ios::app);
+    if (out) {
+        out << pid << "\n";
+    }
+}
+
+void WorkspaceManager::remove_active_pid(int pid) {
+    if (pid <= 0) return;
+    std::lock_guard<std::mutex> lock(pid_mutex_);
+    auto p = active_pids_path();
+    std::ifstream in(p);
+    if (!in) return;
+    std::vector<int> pids;
+    int curr = 0;
+    while (in >> curr) {
+        if (curr != pid && curr > 0) {
+            pids.push_back(curr);
+        }
+    }
+    in.close();
+    std::ofstream out(p, std::ios::trunc);
+    if (out) {
+        for (int id : pids) {
+            out << id << "\n";
+        }
+    }
+}
+
+std::vector<int> WorkspaceManager::get_active_pids() const {
+    std::lock_guard<std::mutex> lock(pid_mutex_);
+    auto p = active_pids_path();
+    std::ifstream in(p);
+    if (!in) return {};
+    std::vector<int> pids;
+    int curr = 0;
+    while (in >> curr) {
+        if (curr > 0) pids.push_back(curr);
+    }
+    return pids;
+}
+
+void WorkspaceManager::kill_run(const std::filesystem::path& target_dir) {
+    std::error_code ec;
+    auto script = target_dir / "kill_jobs.sh";
+    if (std::filesystem::exists(script, ec)) {
+        std::string cmd = "/bin/bash \"" + script.string() + "\"";
+        int rc = std::system(cmd.c_str());
+        (void)rc;
+        return;
+    }
+
+    auto pfile = target_dir / "active_pids.txt";
+    if (std::filesystem::exists(pfile, ec)) {
+        std::ifstream in(pfile);
+        int pid = 0;
+        std::vector<int> pids;
+        while (in >> pid) {
+            if (pid > 0) pids.push_back(pid);
+        }
+        for (int p : pids) {
+            kill(-p, SIGTERM);
+            kill(p, SIGTERM);
+        }
+        usleep(500000);
+        for (int p : pids) {
+            kill(-p, SIGKILL);
+            kill(p, SIGKILL);
+        }
+    }
+
+    std::string pkill_cmd = "pkill -f \"" + (target_dir / "stages").string() + "\" 2>/dev/null || true";
+    int p_rc = std::system(pkill_cmd.c_str());
+    (void)p_rc;
 }
 
 } // namespace condor

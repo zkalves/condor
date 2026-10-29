@@ -170,6 +170,13 @@ public:
     bool is_aborted() const { return aborted_; }
 
     /**
+     * @brief Accesses the bound WorkspaceManager instance.
+     * @return Reference to WorkspaceManager.
+     */
+    WorkspaceManager& workspace() { return workspace_; }
+    const WorkspaceManager& workspace() const { return workspace_; }
+
+    /**
      * @brief Immediately aborts all running jobs and halts scheduling of new jobs.
      */
     void abort_all();

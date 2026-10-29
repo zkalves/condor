@@ -233,6 +233,27 @@ void ProgressDisplay::render_interactive(const ProgressStats& stats,
         }
     }
 
+    // 4. Interactive Controls & Emergency Cleanup Footer
+    int banner_cols = std::clamp(cols, 40, 80);
+    std::string div_line(banner_cols, '-');
+    std::cout << div_line << "\n";
+    lines++;
+
+    std::cout << "Available keys: [m] Runtime Menu | [Ctrl+C] Cancel / Abort\n";
+    lines++;
+
+    std::string kill_cmd = !kill_script_path_.empty()
+                               ? kill_script_path_.string()
+                               : ("pkill -f '" + run_dir_.string() + "'");
+    std::ostringstream kill_ss;
+    kill_ss << "Emergency kill (if CLI crashes): " << kill_cmd;
+    std::string kill_str = kill_ss.str();
+    if (static_cast<int>(kill_str.length()) > cols) {
+        kill_str = kill_str.substr(0, std::max(10, cols - 3)) + "...";
+    }
+    std::cout << kill_str << "\n";
+    lines++;
+
     std::cout << std::flush;
     last_lines_rendered_ = lines;
 }

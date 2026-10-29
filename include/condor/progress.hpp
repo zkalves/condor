@@ -43,6 +43,7 @@
 #include <vector>
 #include <chrono>
 #include <mutex>
+#include <filesystem>
 #include "condor/common.hpp"
 
 namespace condor {
@@ -133,6 +134,18 @@ public:
     OutputMode output_mode() const { return output_mode_; }
 
     /**
+     * @brief Sets the filesystem path of the active run directory.
+     * @param run_dir Active run directory path.
+     */
+    void set_run_dir(const std::filesystem::path& run_dir) { run_dir_ = run_dir; }
+
+    /**
+     * @brief Sets the filesystem path of the emergency kill script.
+     * @param kill_script Path to `<run_dir>/kill_jobs.sh`.
+     */
+    void set_kill_script(const std::filesystem::path& kill_script) { kill_script_path_ = kill_script; }
+
+    /**
      * @brief Updates the live progress display with latest pipeline metrics.
      * @param stats Overall pipeline statistics.
      * @param stages Per-stage summary metrics.
@@ -189,6 +202,8 @@ private:
     OutputMode output_mode_{OutputMode::ALL};
     bool paused_{false};
     int last_lines_rendered_{0};
+    std::filesystem::path run_dir_;
+    std::filesystem::path kill_script_path_;
     std::chrono::steady_clock::time_point last_dump_time_;
     mutable std::mutex mutex_;
 };

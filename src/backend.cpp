@@ -276,9 +276,10 @@ void LocalBackend::submit(JobExecutionContext& ctx) {
         }
 
         // Exec runner script
+        std::string runner_path = pdir + "/job_runner.sh";
         char* const argv[] = {
             const_cast<char*>("bash"),
-            const_cast<char*>("job_runner.sh"),
+            const_cast<char*>(runner_path.c_str()),
             nullptr
         };
         execvp("bash", argv);
