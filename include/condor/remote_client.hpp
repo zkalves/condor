@@ -99,6 +99,12 @@ public:
     void send_telemetry(const nlohmann::json& telemetry);
 
     /**
+     * @brief Uploads the pipeline execution HTML report to the central server.
+     * @param html_content Raw HTML report string.
+     */
+    void send_report(const std::string& html_content);
+
+    /**
      * @brief Registers callback function invoked when control commands are received from the server.
      * @param cb Callback function accepting action name and parameter payload.
      */

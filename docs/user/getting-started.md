@@ -334,6 +334,13 @@ condor examples/verilator/scripts/pipeline.yaml \
 
 From the web dashboard, you can monitor stage progression live and interactively pause/resume execution or abort runaway jobs remotely.
 
+### Step 3: View HTML Execution Reports
+
+Upon pipeline completion, the Condor runner automatically uploads its standalone interactive `report.html` to Condor Hub (stored on disk in `--artifacts-dir`, defaulting to `./hub_artifacts/<run_id>/report.html`).
+
+- In the web dashboard, completed runs display an interactive **📄 HTML Report** button that opens the full report in a new tab.
+- You can also navigate directly to `http://localhost:8080/reports/<run_id>` in any browser.
+
 ---
 
 ## 6. Next Steps

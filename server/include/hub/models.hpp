@@ -97,6 +97,9 @@ struct RunRecord {
     std::vector<StageRecord> stages;
     std::vector<std::string> event_log;
 
+    bool has_report{false};
+    std::string report_url;
+
     nlohmann::json to_json() const {
         nlohmann::json act_arr = nlohmann::json::array();
         for (const auto& a : active_jobs) {
@@ -117,6 +120,8 @@ struct RunRecord {
             {"project", project},
             {"tags", tags},
             {"status", status},
+            {"has_report", has_report},
+            {"report_url", report_url},
             {"progress", {
                 {"total_jobs", total_jobs},
                 {"completed_jobs", passed_jobs + failed_jobs + skipped_jobs},

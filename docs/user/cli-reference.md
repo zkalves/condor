@@ -163,6 +163,7 @@ condor-hub [OPTIONS]
 | :--- | :--- | :--- | :--- |
 | `-p`, `--port` | `<port>` | `8080` | Port to listen on for HTTP web dashboard and WebSocket connections. |
 | `-H`, `--host` | `<host>` | `0.0.0.0` | Host or network interface address to bind. |
+| `-a`, `--artifacts-dir` | `<path>` | `./hub_artifacts` | Directory where uploaded client HTML reports and run artifacts are stored. |
 | `-t`, `--token`| `<token>`| *(empty)* | Optional Bearer authorization token for client and dashboard authentication. |
 | `-w`, `--workers`| `<N>` | `4` | Worker thread count for epoll connection handling. |
 | `-h`, `--help` | None (Flag) | None | Display command-line usage information and exit. |
@@ -170,9 +171,22 @@ condor-hub [OPTIONS]
 ### Running Condor Hub
 
 ```bash
-# Start server with default settings (http://0.0.0.0:8080)
+# Start server with default settings (http://0.0.0.0:8080, storing reports in ./hub_artifacts)
 condor-hub
 
-# Bind to localhost on custom port with authentication token
-condor-hub --host 127.0.0.1 --port 9090 --token secret123
+# Bind to localhost on custom port with authentication token and dedicated artifacts storage
+condor-hub --host 127.0.0.1 --port 9090 --token secret123 --artifacts-dir /var/log/condor/artifacts
 ```
+
+### Server HTTP & WebSocket Endpoints
+
+| Endpoint | Method / Protocol | Description |
+| :--- | :--- | :--- |
+| `/` | `GET` (HTTP) | Single-page real-time fleet dashboard UI. |
+| `/api/v1/runs` | `GET` (HTTP) | Returns JSON list of all active and finished runs, including status, progress, metrics, and report links. |
+| `/reports/<run_id>` | `GET` (HTTP) | Serves the standalone interactive HTML execution report uploaded by the runner upon pipeline completion. |
+| `/reports/<run_id>/report.html` | `GET` (HTTP) | Direct path alias to the run's HTML report. |
+| `/api/v1/runs/<run_id>/report` | `POST` (HTTP) | Uploads an HTML report file for a run (used by runners or external integrations). |
+| `/api/v1/control` | `POST` (HTTP) | Submits runner control actions (`pause`, `resume`, `abort`, `kill_job`, `scale`). |
+| `/api/v1/ws` | WebSocket (RFC 6455) | Bidirectional runner telemetry stream and remote control channel. |
+| `/ws/dashboard` | WebSocket (RFC 6455) | Real-time broadcast channel for live browser UI telemetry updates. |

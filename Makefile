@@ -22,6 +22,7 @@ HUB_PORT     ?= 8080
 HUB_HOST     ?= 0.0.0.0
 HUB_TOKEN    ?=
 HUB_WORKERS  ?= 4
+HUB_ARTIFACTS_DIR ?= ./hub_artifacts
 
 PREFIX       ?= /usr/local
 DESTDIR      ?=
@@ -104,6 +105,7 @@ help: ## Show this help message with all available targets
 	@echo "  HUB_HOST             Condor Hub bind address (current: $(HUB_HOST))"
 	@echo "  HUB_TOKEN            Condor Hub authentication token (optional)"
 	@echo "  HUB_WORKERS          Condor Hub worker thread count (current: $(HUB_WORKERS))"
+	@echo "  HUB_ARTIFACTS_DIR    Directory for storing client HTML reports (current: $(HUB_ARTIFACTS_DIR))"
 	@echo "========================================================================"
 
 # ------------------------------------------------------------------------------
@@ -179,8 +181,8 @@ build-server build-hub: ## Build Condor Hub server executable
 	@echo "==> Server build complete: $(HUB_BIN)"
 
 run-server run-hub server hub: $(HUB_BIN) ## Start Condor Hub reporting and remote control server
-	@echo "==> Starting Condor Hub on $(HUB_HOST):$(HUB_PORT)..."
-	@$(HUB_BIN) --host $(HUB_HOST) --port $(HUB_PORT) --workers $(HUB_WORKERS) $(if $(HUB_TOKEN),--token $(HUB_TOKEN),)
+	@echo "==> Starting Condor Hub on $(HUB_HOST):$(HUB_PORT) (artifacts: $(HUB_ARTIFACTS_DIR))..."
+	@$(HUB_BIN) --host $(HUB_HOST) --port $(HUB_PORT) --workers $(HUB_WORKERS) --artifacts-dir $(HUB_ARTIFACTS_DIR) $(if $(HUB_TOKEN),--token $(HUB_TOKEN),)
 
 run-remote: $(CONDOR_BIN) ## Run example pipeline reporting to Condor Hub
 	@echo "==> Executing examples/simple/scripts/pipeline.yaml connected to Condor Hub..."
@@ -317,7 +319,7 @@ clean: ## Remove build artifacts
 
 clean-runs: ## Remove generated execution directories (condor_runs/)
 	@echo "==> Cleaning run output directories..."
-	@rm -rf condor_runs/ test_condor_runs/ test_sched_run/ test_sched_fail/ test_pipe_env/ test_pipe_seq/
+	@rm -rf condor_runs/ test_condor_runs/ test_sched_run/ test_sched_fail/ test_pipe_env/ test_pipe_seq/ hub_artifacts/
 
 clean-docs: ## Remove generated documentation portal (_site/)
 	@echo "==> Cleaning documentation portal directory..."

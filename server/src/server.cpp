@@ -22,6 +22,7 @@
 #include "hub/dashboard_html.hpp"
 
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <cstring>
 #include <vector>
@@ -498,6 +499,78 @@ void HubServer::handle_http_request(int fd, const std::string& raw_request) {
         return;
     }
 
+    // REST: Upload HTML report /api/v1/runs/{id}/report
+    if (method == "POST" && path.rfind("/api/v1/runs/", 0) == 0 && path.find("/report") != std::string::npos) {
+        size_t prefix_len = std::string("/api/v1/runs/").size();
+        size_t rep_pos = path.find("/report");
+        std::string target_run_id = path.substr(prefix_len, rep_pos - prefix_len);
+        bool saved = fleet_manager_.save_report(target_run_id, post_body, config_.artifacts_dir);
+
+        nlohmann::json res = {{"status", saved ? "saved" : "error"},
+                              {"run_id", target_run_id},
+                              {"report_url", "/reports/" + target_run_id}};
+        std::string body = res.dump();
+        std::ostringstream resp;
+        resp << "HTTP/1.1 " << (saved ? "200 OK" : "400 Bad Request") << "\r\n"
+             << "Content-Type: application/json\r\n"
+             << "Access-Control-Allow-Origin: *\r\n"
+             << "Content-Length: " << body.size() << "\r\n"
+             << "Connection: close\r\n\r\n"
+             << body;
+        std::string s = resp.str();
+        send(fd, s.c_str(), s.size(), MSG_NOSIGNAL);
+        close_connection(fd);
+        return;
+    }
+
+    // Serve HTML execution reports /reports/{id}
+    if (method == "GET" && path.rfind("/reports/", 0) == 0) {
+        std::string target_run_id = path.substr(std::string("/reports/").size());
+        if (target_run_id.ends_with("/report.html")) {
+            target_run_id = target_run_id.substr(0, target_run_id.size() - std::string("/report.html").size());
+        } else if (target_run_id.ends_with("/")) {
+            target_run_id.pop_back();
+        }
+
+        std::string report_file = fleet_manager_.get_report_path(target_run_id, config_.artifacts_dir);
+        if (!report_file.empty()) {
+            std::ifstream ifs(report_file, std::ios::binary);
+            if (ifs) {
+                std::string content((std::istreambuf_iterator<char>(ifs)),
+                                     std::istreambuf_iterator<char>());
+                std::ostringstream resp;
+                resp << "HTTP/1.1 200 OK\r\n"
+                     << "Content-Type: text/html; charset=utf-8\r\n"
+                     << "Access-Control-Allow-Origin: *\r\n"
+                     << "Content-Length: " << content.size() << "\r\n"
+                     << "Connection: close\r\n\r\n"
+                     << content;
+                std::string s = resp.str();
+                send(fd, s.c_str(), s.size(), MSG_NOSIGNAL);
+                close_connection(fd);
+                return;
+            }
+        }
+
+        std::string not_found_html = "<!DOCTYPE html><html><head><title>Report Not Found</title>"
+            "<style>body{background:#0f172a;color:#f8fafc;font-family:sans-serif;padding:40px;text-align:center;}"
+            "h1{color:#ef4444;}a{color:#38bdf8;text-decoration:none;}</style></head><body>"
+            "<h1>404 - HTML Report Not Found</h1>"
+            "<p>No HTML report uploaded yet for run: <code>" + target_run_id + "</code></p>"
+            "<p style=\"margin-top:20px;\"><a href=\"/\">&larr; Return to Dashboard</a></p></body></html>";
+
+        std::ostringstream resp;
+        resp << "HTTP/1.1 404 Not Found\r\n"
+             << "Content-Type: text/html; charset=utf-8\r\n"
+             << "Content-Length: " << not_found_html.size() << "\r\n"
+             << "Connection: close\r\n\r\n"
+             << not_found_html;
+        std::string s = resp.str();
+        send(fd, s.c_str(), s.size(), MSG_NOSIGNAL);
+        close_connection(fd);
+        return;
+    }
+
     // Default 404
     std::string not_found = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
     send(fd, not_found.c_str(), not_found.size(), MSG_NOSIGNAL);
@@ -565,6 +638,12 @@ size_t HubServer::handle_websocket_data(int fd, const uint8_t* data, size_t len)
                     std::string run_id = j.value("run_id", "");
                     std::string event = j.value("event", "");
                     fleet_manager_.record_event(run_id, event, j.value("payload", nlohmann::json::object()));
+                } else if (type == "report_upload") {
+                    std::string run_id = j.value("run_id", "");
+                    std::string html = j.value("html", "");
+                    if (!run_id.empty() && !html.empty()) {
+                        fleet_manager_.save_report(run_id, html, config_.artifacts_dir);
+                    }
                 }
             } catch (...) {
                 // Ignore parse errors on malformed frames

@@ -373,7 +373,7 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
           const msg = JSON.parse(event.data);
           if (msg.type === 'fleet_update') {
             updateRuns(msg.runs);
-          } else if (msg.type === 'telemetry' || msg.type === 'event' || msg.type === 'client_registered' || msg.type === 'client_disconnected') {
+          } else if (msg.type === 'telemetry' || msg.type === 'event' || msg.type === 'client_registered' || msg.type === 'client_disconnected' || msg.type === 'report_received') {
             fetchRuns();
           }
         } catch (e) {
@@ -480,9 +480,11 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
                   <span>Status: <span class="badge ${statusClass}">${run.status}</span></span>
                   <span>Elapsed: <strong>${formatTime(prog.elapsed_sec || 0)}</strong></span>
                   ${run.peak_rss_mb > 0 ? `<span>Peak RSS: <strong>${run.peak_rss_mb.toFixed(1)} MB</strong></span>` : ''}
+                  ${run.has_report ? `<span>Report: <a href="/reports/${run.run_id}" target="_blank" style="color:var(--primary);text-decoration:none;font-weight:600;">Available &nearr;</a></span>` : ''}
                 </div>
               </div>
               <div class="run-actions">
+                ${run.has_report ? `<a href="/reports/${run.run_id}" target="_blank" class="btn btn-secondary" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px;">📄 HTML Report</a>` : ''}
                 ${isRunning ? `<button class="btn btn-warning" onclick="sendControl('${run.run_id}', 'pause')">⏸️ Pause</button>` : ''}
                 ${isPaused ? `<button class="btn btn-primary" onclick="sendControl('${run.run_id}', 'resume')">▶️ Resume</button>` : ''}
                 ${(isRunning || isPaused) ? `<button class="btn btn-danger" onclick="sendControl('${run.run_id}', 'abort')">🛑 Abort</button>` : ''}

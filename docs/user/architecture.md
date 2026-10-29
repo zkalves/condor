@@ -179,3 +179,5 @@ flowchart LR
    When `server:` is omitted from the pipeline configuration and `--server-url` is not specified on the CLI, the client operates 100% offline with zero network attempts and zero background telemetry threads.
 3. **Bidirectional Control Loop**:
    The WebSocket channel allows runners to stream live telemetry (job states, PIDs, elapsed runtimes, peak RSS) while listening for server commands (pause, resume, abort, kill job, scale worker slots) dispatched from the central dashboard.
+4. **Centralized HTML Report Archive & Serving**:
+   When a pipeline run completes, the runner automatically uploads its standalone `report.html` execution report to the Hub. The server persists the report into the configured artifacts directory (`--artifacts-dir`, defaulting to `./hub_artifacts/<run_id>/report.html`) and serves it directly over HTTP at `/reports/<run_id>` for instant browser inspection.
