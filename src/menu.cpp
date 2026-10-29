@@ -26,6 +26,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <sstream>
+#include <cstdlib>
 
 namespace condor {
 
@@ -33,10 +34,118 @@ std::atomic<int64_t> RuntimeMenu::last_sigint_time_ms_{0};
 std::atomic<bool> RuntimeMenu::hard_kill_triggered_{false};
 std::atomic<bool> RuntimeMenu::menu_requested_{false};
 Scheduler* RuntimeMenu::active_scheduler_{nullptr};
+struct termios RuntimeMenu::orig_termios_{};
+std::atomic<bool> RuntimeMenu::raw_mode_active_{false};
+std::atomic<bool> RuntimeMenu::atexit_registered_{false};
+
+TerminalModeGuard::TerminalModeGuard(bool enable) : active_(enable) {
+    if (active_) {
+        RuntimeMenu::enable_raw_mode();
+    }
+}
+
+TerminalModeGuard::~TerminalModeGuard() {
+    if (active_) {
+        RuntimeMenu::disable_raw_mode();
+    }
+}
+
+TerminalModeGuard::TerminalModeGuard(TerminalModeGuard&& other) noexcept
+    : active_(other.active_) {
+    other.active_ = false;
+}
+
+TerminalModeGuard& TerminalModeGuard::operator=(TerminalModeGuard&& other) noexcept {
+    if (this != &other) {
+        if (active_) {
+            RuntimeMenu::disable_raw_mode();
+        }
+        active_ = other.active_;
+        other.active_ = false;
+    }
+    return *this;
+}
 
 static int64_t get_time_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+bool RuntimeMenu::is_terminal_interactive() {
+    if (!isatty(STDIN_FILENO)) return false;
+    pid_t fg_pgrp = tcgetpgrp(STDIN_FILENO);
+    if (fg_pgrp != -1 && fg_pgrp != getpgrp()) {
+        return false;
+    }
+    return true;
+}
+
+void RuntimeMenu::enable_raw_mode() {
+    if (!is_terminal_interactive()) return;
+
+    if (raw_mode_active_.load()) return;
+
+    if (!atexit_registered_.exchange(true)) {
+        std::atexit(&RuntimeMenu::disable_raw_mode);
+    }
+
+    if (tcgetattr(STDIN_FILENO, &orig_termios_) != 0) {
+        return;
+    }
+
+    struct termios raw = orig_termios_;
+    // Suppress echo, newline echo, canonical line buffering, and control char echo (^C)
+    raw.c_lflag &= ~(ECHO | ECHONL | ICANON | ECHOCTL);
+    // Disable software flow control (Ctrl+S / Ctrl+Q)
+    raw.c_iflag &= ~(IXON);
+    // Non-blocking single-byte reads
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+
+    // Temporarily ignore SIGTTOU to avoid process stoppage when backgrounded
+    struct sigaction sa_ign, sa_old;
+    sa_ign.sa_handler = SIG_IGN;
+    sigemptyset(&sa_ign.sa_mask);
+    sa_ign.sa_flags = 0;
+    sigaction(SIGTTOU, &sa_ign, &sa_old);
+
+    int ret = tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
+    sigaction(SIGTTOU, &sa_old, nullptr);
+
+    if (ret == 0) {
+        raw_mode_active_.store(true);
+        // Hide terminal cursor during live display
+        std::cout << "\033[?25l" << std::flush;
+    }
+}
+
+void RuntimeMenu::disable_raw_mode() {
+    bool expected = true;
+    if (!raw_mode_active_.compare_exchange_strong(expected, false)) {
+        return;
+    }
+
+    if (!isatty(STDIN_FILENO)) return;
+
+    // Temporarily ignore SIGTTOU while resetting terminal attributes
+    struct sigaction sa_ign, sa_old;
+    sa_ign.sa_handler = SIG_IGN;
+    sigemptyset(&sa_ign.sa_mask);
+    sa_ign.sa_flags = 0;
+    sigaction(SIGTTOU, &sa_ign, &sa_old);
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios_);
+
+    sigaction(SIGTTOU, &sa_old, nullptr);
+
+    // Restore terminal cursor to visible (async-signal-safe)
+    ssize_t written = write(STDOUT_FILENO, "\033[?25h", 6);
+    (void)written;
+}
+
+bool RuntimeMenu::is_raw_mode_active() {
+    return raw_mode_active_.load();
 }
 
 void RuntimeMenu::handle_sigint() {
@@ -66,13 +175,28 @@ static void sigint_handler(int sig) {
     RuntimeMenu::handle_sigint();
 }
 
+static void fatal_signal_handler(int sig) {
+    RuntimeMenu::disable_raw_mode();
+    RuntimeMenu::restore_signal_handlers();
+    raise(sig);
+}
+
 void RuntimeMenu::init_signal_handlers(Scheduler* scheduler) {
     active_scheduler_ = scheduler;
+
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, nullptr);
+
+    struct sigaction fatal_sa;
+    fatal_sa.sa_handler = fatal_signal_handler;
+    sigemptyset(&fatal_sa.sa_mask);
+    fatal_sa.sa_flags = 0;
+    sigaction(SIGTERM, &fatal_sa, nullptr);
+    sigaction(SIGHUP, &fatal_sa, nullptr);
+    sigaction(SIGQUIT, &fatal_sa, nullptr);
 }
 
 void RuntimeMenu::restore_signal_handlers() {
@@ -81,6 +205,9 @@ void RuntimeMenu::restore_signal_handlers() {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
+    sigaction(SIGHUP, &sa, nullptr);
+    sigaction(SIGQUIT, &sa, nullptr);
     active_scheduler_ = nullptr;
 }
 
@@ -101,20 +228,19 @@ void RuntimeMenu::clear_menu_request() {
 }
 
 void RuntimeMenu::poll_stdin_for_menu() {
-    if (!isatty(STDIN_FILENO)) return;
+    if (!is_terminal_interactive()) return;
 
     struct pollfd pfd;
     pfd.fd = STDIN_FILENO;
     pfd.events = POLLIN;
     pfd.revents = 0;
 
-    int ret = poll(&pfd, 1, 0); // 0 timeout: non-blocking
-    if (ret > 0 && (pfd.revents & POLLIN)) {
+    // Drain available keystrokes non-blockingly so stray inputs don't corrupt the HUD
+    while (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
         char ch = 0;
-        if (read(STDIN_FILENO, &ch, 1) > 0) {
-            if (ch == 'm' || ch == 'M') {
-                menu_requested_ = true;
-            }
+        if (read(STDIN_FILENO, &ch, 1) <= 0) break;
+        if (ch == 'm' || ch == 'M' || ch == 'h' || ch == 'H' || ch == '?') {
+            menu_requested_ = true;
         }
     }
 }
@@ -232,6 +358,11 @@ void RuntimeMenu::print_help() {
 
 void RuntimeMenu::run_menu(Scheduler& scheduler) {
     clear_menu_request();
+    bool was_raw = is_raw_mode_active();
+    if (was_raw) {
+        disable_raw_mode();
+    }
+
     print_help();
 
     std::string line;
@@ -289,6 +420,10 @@ void RuntimeMenu::run_menu(Scheduler& scheduler) {
             std::cout << "Enter command (or 'c' to continue): " << std::flush;
             continue;
         }
+    }
+
+    if (was_raw && !scheduler.is_aborted()) {
+        enable_raw_mode();
     }
 }
 

@@ -48,6 +48,7 @@ Scheduler::Scheduler(const PipelineConfig& config, WorkspaceManager& workspace)
 }
 
 Scheduler::~Scheduler() {
+    RuntimeMenu::disable_raw_mode();
     RuntimeMenu::restore_signal_handlers();
 }
 
@@ -1192,6 +1193,9 @@ bool Scheduler::run() {
     init_runtime_states();
     RuntimeMenu::init_signal_handlers(this);
 
+    bool interactive = !config_.settings.no_interactive && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO);
+    TerminalModeGuard term_guard(interactive);
+
     // If remote reporting server is configured, start client
     if (remote_client_ && remote_client_->is_enabled()) {
         remote_client_->start();
@@ -1315,6 +1319,9 @@ bool Scheduler::run() {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
     }
+
+    // Main execution loop finished - restore terminal mode immediately
+    RuntimeMenu::disable_raw_mode();
 
     auto final_stats = compute_progress_stats();
     bool pipeline_success = (final_stats.failed_jobs == 0 && !aborted_);
