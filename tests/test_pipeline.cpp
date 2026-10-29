@@ -19,6 +19,7 @@
 
 #include "condor/scheduler.hpp"
 #include "condor/parser.hpp"
+#include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -345,4 +346,78 @@ stages:
     ASSERT_TRUE(report_html.find("Path Style:</strong> relative") != std::string::npos);
 
     std::filesystem::remove_all(test_dir, ec);
+}
+
+TEST_CASE(progress_display_dag_and_stage_alignment) {
+    ProgressDisplay display(true, 30);
+    ProgressStats stats;
+    stats.total_jobs = 4;
+    stats.passed_jobs = 2;
+    stats.running_jobs = 1;
+    stats.queued_jobs = 1;
+
+    std::vector<StageSummaryInfo> stages = {
+        {"build", 1, 1, 0, 0, 0},
+        {"test", 1, 2, 1, 0, 0},
+        {"package", 0, 1, 0, 0, 0}
+    };
+    std::vector<ActiveJobInfo> active = {
+        {"0001", "test", "unit_test", "12345", 1.5}
+    };
+
+    // Capture stdout
+    std::ostringstream oss;
+    std::streambuf* old_cout = std::cout.rdbuf(oss.rdbuf());
+    display.update(stats, stages, active);
+    std::cout.rdbuf(old_cout);
+
+    std::string output = oss.str();
+    std::istringstream iss(output);
+    std::string line;
+    std::vector<std::string> lines;
+    while (std::getline(iss, line)) {
+        if (!line.empty()) {
+            lines.push_back(line);
+        }
+    }
+
+    ASSERT_TRUE(lines.size() >= 5);
+    ASSERT_TRUE(lines[0].find("[DAG Pipeline") != std::string::npos);
+    ASSERT_TRUE(lines[1].find("Stage: build") != std::string::npos);
+    ASSERT_TRUE(lines[1].find("[PASSED]") != std::string::npos);
+    ASSERT_TRUE(lines[2].find("[RUNNING ") != std::string::npos); // Animated spinner on running stage
+    ASSERT_TRUE(lines[3].find("[QUEUED]") != std::string::npos);
+    ASSERT_TRUE(lines[4].find("[0001] test/unit_test") != std::string::npos); // Animated active ticker
+
+    // Find progress bar opening '[' on DAG line and Stage lines
+    size_t dag_prefix_end = lines[0].find(']');
+    ASSERT_TRUE(dag_prefix_end != std::string::npos);
+    size_t dag_bar_start = lines[0].find('[', dag_prefix_end + 1);
+    ASSERT_TRUE(dag_bar_start != std::string::npos);
+
+    size_t stage0_bar_start = lines[1].find('[');
+    ASSERT_TRUE(stage0_bar_start != std::string::npos);
+
+    // Verify DAG progress bar start column matches Stage progress bar start column
+    ASSERT_EQ(dag_bar_start, stage0_bar_start);
+
+    // Verify closing ']' column matches
+    size_t dag_bar_end = lines[0].find(']', dag_bar_start + 1);
+    size_t stage0_bar_end = lines[1].find(']', stage0_bar_start + 1);
+    ASSERT_TRUE(dag_bar_end != std::string::npos);
+    ASSERT_TRUE(stage0_bar_end != std::string::npos);
+    ASSERT_EQ(dag_bar_end, stage0_bar_end);
+
+    // Verify bar length matches
+    size_t dag_bar_len = dag_bar_end - dag_bar_start;
+    size_t stage0_bar_len = stage0_bar_end - stage0_bar_start;
+    ASSERT_EQ(dag_bar_len, stage0_bar_len);
+
+    // Verify all other stages also align
+    for (size_t i = 2; i <= 3; ++i) {
+        size_t s_start = lines[i].find('[');
+        size_t s_end = lines[i].find(']', s_start + 1);
+        ASSERT_EQ(s_start, dag_bar_start);
+        ASSERT_EQ(s_end, dag_bar_end);
+    }
 }

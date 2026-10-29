@@ -279,7 +279,7 @@ condor examples/simple/scripts/pipeline.yaml
 During execution, Condor displays a real-time responsive ANSI progress display showing the overall DAG progression, per-stage progress tracks, active running jobs, PIDs, and elapsed runtimes:
 
 ```text
-[DAG Pipeline] [##########] 100% | Jobs: 4 | Running: 0 | Queued: 0 | Passed: 4
+[DAG Pipeline]             [######################] 100% | Jobs: 4 | Running: 0 | Queued: 0 | Passed: 4
   Stage: build             [######################] 100% [PASSED]   (1/1 passed)
   Stage: test              [######################] 100% [PASSED]   (2/2 passed)
   Stage: package           [######################] 100% [PASSED]   (1/1 passed)
