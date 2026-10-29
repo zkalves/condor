@@ -95,10 +95,13 @@ int main(int argc, char** argv) {
     std::string server_owner;
     std::vector<std::string> server_tags;
     int server_poll_ms{0};
+    std::string kill_run_path;
 
     // CLI Options per specification
     app.add_option("pipeline_file,--pipeline-config", pipeline_config_path, "Path to pipeline YAML configuration")
        ->check(CLI::ExistingFile);
+
+    app.add_option("--kill-run", kill_run_path, "Emergency kill all running jobs in specified run directory (or latest)");
 
     app.add_option("--stage", stage_name, "Run only the specified stage (must match ^[a-zA-Z0-9_-]+$)");
     app.add_option("--max-parallel-jobs", max_parallel_jobs, "Maximum concurrent local jobs (default: hardware concurrency)");
@@ -169,6 +172,25 @@ int main(int argc, char** argv) {
         app.parse(argc, argv);
     } catch (const CLI::ParseError& e) {
         return app.exit(e);
+    }
+
+    if (!kill_run_path.empty()) {
+        std::error_code ec;
+        std::string base_dir = base_output_dir.empty() ? "./condor_runs" : base_output_dir;
+        std::filesystem::path target = kill_run_path;
+        if (!std::filesystem::exists(target, ec)) {
+            auto candidate = std::filesystem::path(base_dir) / kill_run_path;
+            if (std::filesystem::exists(candidate, ec)) {
+                target = candidate;
+            }
+        }
+        if (std::filesystem::is_symlink(target, ec)) {
+            auto resolved = std::filesystem::canonical(target, ec);
+            if (!ec) target = resolved;
+        }
+        std::cout << "[CONDOR] Emergency kill requested for run directory: " << target.string() << std::endl;
+        WorkspaceManager::kill_run(target);
+        return 0;
     }
 
     if (pipeline_config_path.empty()) {
@@ -522,7 +544,10 @@ int main(int argc, char** argv) {
 
     std::cout << "[CONDOR] Launching pipeline '" << config.name << "'\n"
               << "[CONDOR] Active run directory: " << workspace.run_dir() << "\n"
-              << "[CONDOR] Max concurrent slots: " << config.settings.max_parallel_jobs << "\n";
+              << "[CONDOR] Max concurrent slots: " << config.settings.max_parallel_jobs << "\n"
+              << "[CONDOR] Available keys:      [m] Runtime Menu | [Ctrl+C] Cancel / Abort\n"
+              << "[CONDOR] Emergency kill:       " << workspace.kill_script_path().string() << "\n"
+              << "                         (or: pkill -f '" << workspace.run_dir().string() << "')\n";
 
     std::unique_ptr<RemoteServerClient> remote_client;
     if (config.settings.server.enabled && !config.settings.server.url.empty()) {

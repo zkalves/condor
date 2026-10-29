@@ -110,3 +110,37 @@ TEST_CASE(workspace_prune_old_runs) {
 
     std::filesystem::remove_all(test_base, ec);
 }
+
+TEST_CASE(workspace_emergency_kill_script) {
+    std::string test_dir = "./test_ws_kill";
+    std::error_code ec;
+    std::filesystem::remove_all(test_dir, ec);
+
+    WorkspaceManager ws(test_dir);
+    ws.initialize();
+
+    auto script_path = ws.kill_script_path();
+    ASSERT_TRUE(std::filesystem::exists(script_path));
+
+    // Verify file permissions include execution
+    auto perms = std::filesystem::status(script_path).permissions();
+    ASSERT_TRUE((perms & std::filesystem::perms::owner_exec) != std::filesystem::perms::none);
+
+    // Verify PID tracking
+    ws.record_active_pid(12345);
+    ws.record_active_pid(12346);
+    auto pids = ws.get_active_pids();
+    ASSERT_TRUE(pids.size() == 2);
+    ASSERT_TRUE(pids[0] == 12345);
+    ASSERT_TRUE(pids[1] == 12346);
+
+    ws.remove_active_pid(12345);
+    pids = ws.get_active_pids();
+    ASSERT_TRUE(pids.size() == 1);
+    ASSERT_TRUE(pids[0] == 12346);
+
+    // Test WorkspaceManager::kill_run execution
+    WorkspaceManager::kill_run(ws.run_dir());
+
+    std::filesystem::remove_all(test_dir, ec);
+}

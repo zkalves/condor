@@ -45,6 +45,8 @@ Scheduler::Scheduler(const PipelineConfig& config, WorkspaceManager& workspace)
     bool interactive = isatty(STDOUT_FILENO) && !config_.settings.no_interactive;
     progress_ = std::make_unique<ProgressDisplay>(interactive, config_.settings.status_interval_sec);
     progress_->set_output_mode(config_.settings.output_mode);
+    progress_->set_run_dir(workspace_.run_dir());
+    progress_->set_kill_script(workspace_.kill_script_path());
 }
 
 Scheduler::~Scheduler() {
@@ -618,6 +620,9 @@ void Scheduler::dispatch_ready_jobs() {
                 job.backend->submit(*ctx);
                 job.status = JobStatus::RUNNING;
                 job.pid_or_grid_id = ctx->grid_id;
+                if (ctx->pid > 0) {
+                    workspace_.record_active_pid(ctx->pid);
+                }
                 job.exec_ctx = std::move(ctx);
 
                 for (const auto& [rname, req] : job.config.resources) {
@@ -655,6 +660,9 @@ void Scheduler::poll_running_jobs() {
             if (job.config.timeout_sec > 0 && elapsed >= job.config.timeout_sec) {
                 CONDOR_LOG_WARN("Job " + jid + " (" + job.config.name + ") timed out after " +
                                 std::to_string(job.config.timeout_sec) + "s! Terminating...");
+                if (job.exec_ctx->pid > 0) {
+                    workspace_.remove_active_pid(job.exec_ctx->pid);
+                }
                 job.backend->cancel(*job.exec_ctx);
                 job.status = JobStatus::TIMEOUT;
                 job.exit_code = 124;
@@ -746,6 +754,9 @@ void Scheduler::poll_running_jobs() {
 
             auto poll_res = job.backend->poll(*job.exec_ctx);
             if (poll_res.finished) {
+                if (job.exec_ctx->pid > 0) {
+                    workspace_.remove_active_pid(job.exec_ctx->pid);
+                }
                 job.exit_code = poll_res.exit_code;
                 job.elapsed_sec = std::chrono::duration<double>(now - job.exec_ctx->start_time).count();
                 job.peak_rss_mb = std::max(job.peak_rss_mb, poll_res.peak_rss_mb);
@@ -1176,6 +1187,9 @@ void Scheduler::abort_all() {
     aborted_ = true;
     for (auto& [jid, job] : jobs_) {
         if (job.status == JobStatus::RUNNING && job.exec_ctx) {
+            if (job.exec_ctx->pid > 0) {
+                workspace_.remove_active_pid(job.exec_ctx->pid);
+            }
             job.backend->cancel(*job.exec_ctx);
             job.status = JobStatus::ABORTED;
             sync_stage_manifest(job.config.stage_name);
