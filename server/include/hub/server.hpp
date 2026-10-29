@@ -85,6 +85,7 @@ private:
     std::atomic<bool> running_{false};
     int listen_fd_{-1};
     int epoll_fd_{-1};
+    int wakeup_fd_{-1};
     std::thread worker_thread_;
 
     // Per-connection state

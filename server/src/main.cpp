@@ -24,13 +24,9 @@
 #include "hub/server.hpp"
 
 static std::atomic<bool> g_shutdown_requested{false};
-static condor::hub::HubServer* g_server{nullptr};
 
 static void signal_handler(int sig) {
-    if (g_server) {
-        std::cout << "\n[CONDOR-HUB] Shutdown signal received (" << sig << "). Stopping server...\n" << std::flush;
-        g_server->stop();
-    }
+    (void)sig;
     g_shutdown_requested.store(true);
 }
 
@@ -47,7 +43,6 @@ int main(int argc, char** argv) {
     CLI11_PARSE(app, argc, argv);
 
     condor::hub::HubServer server(config);
-    g_server = &server;
 
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
@@ -57,7 +52,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    server.wait();
+    while (!g_shutdown_requested.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    std::cout << "\n[CONDOR-HUB] Shutdown signal received. Stopping server...\n" << std::flush;
+    server.stop();
     std::cout << "[CONDOR-HUB] Server shutdown complete." << std::endl;
     return 0;
 }
