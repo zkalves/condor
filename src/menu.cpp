@@ -352,14 +352,8 @@ void RuntimeMenu::print_help() {
               << " [l]        License: Display GNU GPL redistribution conditions\n"
               << " [c]        Continue: Resume live progress display\n"
               << " [q]        Quit / Abort All: Terminate all jobs & exit\n"
-              << div << "\n";
-    if (active_scheduler_) {
-        std::cout << " Emergency kill command (if CLI crashes):\n"
-                  << "   " << active_scheduler_->workspace().kill_script_path().string() << "\n"
-                  << "   (or: pkill -f '" << active_scheduler_->workspace().run_dir().string() << "')\n"
-                  << div << "\n";
-    }
-    std::cout << "Enter command: " << std::flush;
+              << div << "\n"
+              << "Enter command: " << std::flush;
 }
 
 void RuntimeMenu::run_menu(Scheduler& scheduler) {

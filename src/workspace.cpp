@@ -259,6 +259,7 @@ void WorkspaceManager::create_kill_script() {
         << "# ==============================================================================\n"
         << "set -uo pipefail\n\n"
         << "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
+        << "RUN_DIR=\"$(cd \"${SCRIPT_DIR}/..\" && pwd)\"\n"
         << "PID_FILE=\"${SCRIPT_DIR}/active_pids.txt\"\n\n"
         << "if [ ! -f \"${PID_FILE}\" ]; then\n"
         << "    echo \"[CONDOR CLEANUP] No active_pids.txt found in ${SCRIPT_DIR}.\"\n"
@@ -269,7 +270,7 @@ void WorkspaceManager::create_kill_script() {
         << "    echo \"[CONDOR CLEANUP] No active job PIDs recorded for this run.\"\n"
         << "    exit 0\n"
         << "fi\n\n"
-        << "echo \"[CONDOR CLEANUP] Terminating active jobs for run in ${SCRIPT_DIR}...\"\n\n"
+        << "echo \"[CONDOR CLEANUP] Terminating active jobs for run in ${RUN_DIR}...\"\n\n"
         << "# 1. Send SIGTERM to each process group (-PID) and individual PID\n"
         << "for PID in ${PIDS}; do\n"
         << "    if [ -n \"${PID}\" ] && kill -0 \"${PID}\" 2>/dev/null; then\n"
@@ -299,7 +300,7 @@ void WorkspaceManager::create_kill_script() {
         << "    fi\n"
         << "done\n\n"
         << "# Also clean up any lingering processes matching this run directory path\n"
-        << "pkill -f \"${SCRIPT_DIR}/stages\" 2>/dev/null || true\n\n"
+        << "pkill -f \"${RUN_DIR}/stages\" 2>/dev/null || true\n\n"
         << "> \"${PID_FILE}\"\n"
         << "echo \"[CONDOR CLEANUP] All active jobs terminated successfully.\"\n";
 
@@ -362,7 +363,10 @@ std::vector<int> WorkspaceManager::get_active_pids() const {
 
 void WorkspaceManager::kill_run(const std::filesystem::path& target_dir) {
     std::error_code ec;
-    auto script = target_dir / "kill_jobs.sh";
+    auto script = target_dir / "pipeline" / "kill_jobs.sh";
+    if (!std::filesystem::exists(script, ec)) {
+        script = target_dir / "kill_jobs.sh";
+    }
     if (std::filesystem::exists(script, ec)) {
         std::string cmd = "/bin/bash \"" + script.string() + "\"";
         int rc = std::system(cmd.c_str());
@@ -370,7 +374,10 @@ void WorkspaceManager::kill_run(const std::filesystem::path& target_dir) {
         return;
     }
 
-    auto pfile = target_dir / "active_pids.txt";
+    auto pfile = target_dir / "pipeline" / "active_pids.txt";
+    if (!std::filesystem::exists(pfile, ec)) {
+        pfile = target_dir / "active_pids.txt";
+    }
     if (std::filesystem::exists(pfile, ec)) {
         std::ifstream in(pfile);
         int pid = 0;

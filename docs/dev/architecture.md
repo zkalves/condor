@@ -144,7 +144,7 @@ Responsible for reading, expanding, and validating pipeline definitions:
 - **`VariableManager`**: Thread-safe storage for user-defined and built-in variables. Provides fast `${VAR}` and `$VAR` string interpolation with fallback defaults (`${VAR:-default}`). Exports variables formatted as environment pairs (`CONDOR_VAR_<UPPER_KEY>=<VAL>`).
 
 ### Subsystem 4: Filesystem & Workspace Engine (include/condor/workspace.hpp, src/workspace.cpp)
-- **`WorkspaceManager`**: Manages timestamped run folders (`YYYYMMDD_HHMMSS_<rand>`) in `condor_runs/` or explicit `--run-dir` directories, enforcing a clean directory layout (`artifacts/` for HTML/JUnit reports, `pipeline/` for operational logs and summaries, and `stages/` for workload execution). Maintains an atomic symlink `condor_runs/latest` via temp symlink swapping (`rename`). Writes human-readable `stage_manifest.txt`, plain-text `job_status.txt`, and structured `job_status.yaml` records.
+- **`WorkspaceManager`**: Manages timestamped run folders (`YYYYMMDD_HHMMSS_<rand>`) in `condor_runs/` or explicit `--run-dir` directories, enforcing a clean directory layout (`artifacts/` for HTML/JUnit reports, `pipeline/` for operational logs, emergency cleanup script `kill_jobs.sh`, active PID tracker `active_pids.txt`, and summaries, and `stages/` for workload execution). Maintains an atomic symlink `condor_runs/latest` via temp symlink swapping (`rename`). Writes human-readable `stage_manifest.txt`, plain-text `job_status.txt`, and structured `job_status.yaml` records.
 
 ### Subsystem 5: Execution Backends (include/condor/backend.hpp, src/backend.cpp)
 - **`ExecutionBackend`**: Abstract interface defining `submit`, `poll`, and `cancel`.
