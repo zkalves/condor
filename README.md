@@ -235,6 +235,7 @@ OPTIONS:
   --server-url <url>          Central telemetry and control server URL (e.g. ws://localhost:8080/api/v1/ws)
   --server-token <token>      Bearer authorization token for central server
   --server-project <name>     Logical project name for categorization
+  --server-owner <owner>      Owner / user name for run reporting (alias: --owner)
   --server-tags <tag>         Categorization tags (repeatable)
   --server-poll-ms <ms>       Telemetry streaming and poll interval in ms (default: 500)
 ```

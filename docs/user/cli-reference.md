@@ -45,6 +45,7 @@ condor [OPTIONS] <pipeline.yaml>
 | `--server-url` | `<url>` | None (Offline) | Central telemetry and control server URL (e.g. `ws://server:8080/ws` or `http://server:8080`). |
 | `--server-token` | `<token>` | None | Authentication Bearer token for reporting to central server. |
 | `--server-project` | `<name>` | None | Logical project identifier for fleet categorization. |
+| `--server-owner`, `--owner` | `<name>` | `$USER` | Owner or user identifier for pipeline run reporting. |
 | `--server-tags` | `<tag>` | None | Categorization tags for run categorization on the server (repeatable). |
 | `--server-poll-ms` | `<ms>` | `500` | Real-time telemetry streaming and command polling interval in milliseconds. |
 | `--list-backends` | None (Flag) | None | Discover and list all available execution backends on the system and exit. |
