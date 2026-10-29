@@ -89,6 +89,19 @@ struct ContainerConfig {
 };
 
 /**
+ * @struct ServerConfig
+ * @brief Real-time telemetry reporting and remote control server configuration.
+ */
+struct ServerConfig {
+    bool enabled{false};                                ///< If false, client operates 100% offline.
+    std::string url;                                    ///< Server URL (e.g. "ws://localhost:8080/ws" or "http://localhost:8080/api/v1/telemetry").
+    std::string token;                                  ///< Optional authentication Bearer token.
+    std::string project;                                ///< Logical project identifier.
+    std::vector<std::string> tags;                      ///< Descriptive tags for run categorization.
+    int poll_interval_ms{500};                          ///< Telemetry streaming interval in milliseconds (default: 500ms).
+};
+
+/**
  * @struct JobDefaults
  * @brief Baseline default properties inherited by stages and jobs to eliminate repetitive YAML configurations.
  */
@@ -193,6 +206,7 @@ struct PipelineSettings {
     int kill_grace_period_sec{3};                         ///< Grace period in seconds between SIGTERM and SIGKILL (default: 3s).
     size_t max_retained_runs{0};                          ///< Maximum historical runs retained in base_output_dir (0 = unlimited).
     bool purge_successful_logs{false};                    ///< If true, purge raw log files of passing jobs upon completion.
+    ServerConfig server;                                  ///< Central reporting and remote control server settings.
 };
 
 /**

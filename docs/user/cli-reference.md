@@ -42,6 +42,11 @@ condor [OPTIONS] <pipeline.yaml>
 | `--dry-run` | None (Flag) | `false` | Validate YAML syntax, verify stage names, check for DAG cycles, evaluate conditions, print plan, and exit. |
 | `--no-interactive` | None (Flag) | `false` | Disable interactive stdin polling and ANSI progress bar redraws. Recommended for CI logs. |
 | `--verbose-logging`| None (Flag) | `false` | Enable detailed scheduler debug logging to stderr. |
+| `--server-url` | `<url>` | None (Offline) | Central telemetry and control server URL (e.g. `ws://server:8080/ws` or `http://server:8080`). |
+| `--server-token` | `<token>` | None | Authentication Bearer token for reporting to central server. |
+| `--server-project` | `<name>` | None | Logical project identifier for fleet categorization. |
+| `--server-tags` | `<tag>` | None | Categorization tags for run categorization on the server (repeatable). |
+| `--server-poll-ms` | `<ms>` | `500` | Real-time telemetry streaming and command polling interval in milliseconds. |
 | `--list-backends` | None (Flag) | None | Discover and list all available execution backends on the system and exit. |
 | `--warranty` | None (Flag) | None | Display GNU General Public License warranty disclaimer and exit. |
 | `--license` | None (Flag) | None | Display GNU General Public License redistribution conditions and exit. |

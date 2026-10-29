@@ -34,6 +34,7 @@
 #include "condor/scheduler.hpp"
 #include "condor/logging.hpp"
 #include "condor/menu.hpp"
+#include "condor/remote_client.hpp"
 
 #ifndef CONDOR_VERSION
 #define CONDOR_VERSION "1.0.0"
@@ -88,6 +89,11 @@ int main(int argc, char** argv) {
     int kill_grace_period_sec{-1};
     size_t max_retained_runs{0};
     bool purge_successful_logs{false};
+    std::string server_url;
+    std::string server_token;
+    std::string server_project;
+    std::vector<std::string> server_tags;
+    int server_poll_ms{0};
 
     // CLI Options per specification
     app.add_option("pipeline_file,--pipeline-config", pipeline_config_path, "Path to pipeline YAML configuration")
@@ -123,6 +129,12 @@ int main(int argc, char** argv) {
     app.add_flag("--dry-run", dry_run, "Validate stage names, DAG cycles, evaluate conditions, print plan, and exit");
     app.add_flag("--no-interactive", no_interactive, "Disable interactive stdin polling and ANSI progress redraws (CI mode)");
     app.add_flag("--verbose-logging", verbose_logging, "Enable detailed scheduler event logging");
+    app.add_option("--server-url", server_url, "Central reporting server URL (e.g. ws://host:port/ws or http://host:port/api/v1/telemetry)");
+    app.add_option("--server-token", server_token, "Authentication Bearer token for reporting server");
+    app.add_option("--server-project", server_project, "Project identifier for central server reporting");
+    app.add_option("--server-tags", server_tags, "Tags for central server reporting (repeatable)")
+       ->allow_extra_args(false);
+    app.add_option("--server-poll-ms", server_poll_ms, "Interval in milliseconds between real-time telemetry updates (default: 500)");
     app.add_flag_callback("--warranty", []() {
         RuntimeMenu::print_warranty();
         std::exit(0);
@@ -337,6 +349,22 @@ int main(int argc, char** argv) {
     if (purge_successful_logs) {
         config.settings.purge_successful_logs = true;
     }
+    if (!server_url.empty()) {
+        config.settings.server.enabled = true;
+        config.settings.server.url = server_url;
+    }
+    if (!server_token.empty()) {
+        config.settings.server.token = server_token;
+    }
+    if (!server_project.empty()) {
+        config.settings.server.project = server_project;
+    }
+    if (!server_tags.empty()) {
+        config.settings.server.tags = server_tags;
+    }
+    if (server_poll_ms > 0) {
+        config.settings.server.poll_interval_ms = server_poll_ms;
+    }
 
     config.settings.dry_run = dry_run;
     config.settings.no_interactive = no_interactive;
@@ -368,6 +396,12 @@ int main(int argc, char** argv) {
         }
         if (config.settings.purge_successful_logs) {
             std::cout << "Purge Passed Logs:   true\n";
+        }
+        if (config.settings.server.enabled) {
+            std::cout << "Remote Server:       " << config.settings.server.url << "\n";
+            if (!config.settings.server.project.empty()) {
+                std::cout << "Server Project:      " << config.settings.server.project << "\n";
+            }
         }
         std::cout << "----------------------------------------------------------------\n"
                   << "Defined Variables:\n";
@@ -478,10 +512,23 @@ int main(int argc, char** argv) {
 
     std::cout << "[CONDOR] Launching pipeline '" << config.name << "'\n"
               << "[CONDOR] Active run directory: " << workspace.run_dir() << "\n"
-              << "[CONDOR] Max concurrent slots: " << config.settings.max_parallel_jobs << "\n"
-              << std::endl;
+              << "[CONDOR] Max concurrent slots: " << config.settings.max_parallel_jobs << "\n";
+
+    std::unique_ptr<RemoteServerClient> remote_client;
+    if (config.settings.server.enabled && !config.settings.server.url.empty()) {
+        std::cout << "[CONDOR] Remote telemetry & control: " << config.settings.server.url << "\n";
+        remote_client = std::make_unique<RemoteServerClient>(
+            config.settings.server,
+            workspace.run_id(),
+            config.name
+        );
+    }
+    std::cout << std::endl;
 
     Scheduler scheduler(config, workspace);
+    if (remote_client) {
+        scheduler.set_remote_client(remote_client.get());
+    }
     bool success = scheduler.run();
 
     if (config.settings.exit_zero_on_failure) {

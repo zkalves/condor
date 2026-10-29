@@ -112,6 +112,12 @@ public:
     const std::filesystem::path& run_dir() const { return run_dir_; }
 
     /**
+     * @brief Gets the run directory folder name as a unique run identifier.
+     * @return Folder name of active run directory (e.g. "20261029_141500_123456").
+     */
+    std::string run_id() const { return run_dir_.filename().string(); }
+
+    /**
      * @brief Gets the filesystem path for the pipeline artifacts directory (`<run_dir>/artifacts`).
      * @return Path to `<run_dir>/artifacts`.
      */

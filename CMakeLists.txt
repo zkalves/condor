@@ -123,6 +123,7 @@ set(CONDOR_LIB_SOURCES
     src/menu.cpp
     src/scheduler.cpp
     src/html_report.cpp
+    src/remote_client.cpp
 )
 
 add_library(condor_core STATIC ${CONDOR_LIB_SOURCES})

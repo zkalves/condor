@@ -713,6 +713,25 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         if (s["purge_successful_logs"]) {
             config.settings.purge_successful_logs = s["purge_successful_logs"].as<bool>();
         }
+        if (s["server"] && s["server"].IsMap()) {
+            const auto& srv = s["server"];
+            if (srv["enabled"]) config.settings.server.enabled = srv["enabled"].as<bool>();
+            if (srv["url"]) {
+                config.settings.server.url = srv["url"].as<std::string>();
+                if (!srv["enabled"]) config.settings.server.enabled = true;
+            }
+            if (srv["token"]) config.settings.server.token = srv["token"].as<std::string>();
+            if (srv["project"]) config.settings.server.project = srv["project"].as<std::string>();
+            if (srv["tags"] && srv["tags"].IsSequence()) {
+                for (const auto& tag_node : srv["tags"]) {
+                    config.settings.server.tags.push_back(tag_node.as<std::string>());
+                }
+            }
+            if (srv["poll_interval_ms"]) {
+                config.settings.server.poll_interval_ms = srv["poll_interval_ms"].as<int>();
+                if (config.settings.server.poll_interval_ms < 50) config.settings.server.poll_interval_ms = 50;
+            }
+        }
     }
 
     // Parse top-level resources

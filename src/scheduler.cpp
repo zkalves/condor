@@ -22,6 +22,7 @@
 #include "condor/menu.hpp"
 #include "condor/logging.hpp"
 #include "condor/html_report.hpp"
+#include "condor/remote_client.hpp"
 #include <yaml-cpp/yaml.h>
 #include <iostream>
 #include <iomanip>
@@ -625,6 +626,16 @@ void Scheduler::dispatch_ready_jobs() {
                 running_count++;
                 progress_->on_job_started(stage.config.name, job.config.job_id, job.config.name);
                 sync_stage_manifest(stage.config.name);
+
+                if (remote_client_ && remote_client_->is_enabled()) {
+                    remote_client_->send_event("job_started", {
+                        {"job_id", job.config.job_id},
+                        {"name", job.config.name},
+                        {"stage", job.config.stage_name},
+                        {"pid", job.pid_or_grid_id},
+                        {"retry_count", job.retry_count}
+                    });
+                }
             }
         }
     }
@@ -708,6 +719,19 @@ void Scheduler::poll_running_jobs() {
                 sync_stage_manifest(job.config.stage_name);
                 progress_->on_job_finished(job.config.stage_name, job.config.job_id, job.config.name,
                                            job.status, job.exit_code, job.elapsed_sec);
+
+                if (remote_client_ && remote_client_->is_enabled()) {
+                    remote_client_->send_event("job_finished", {
+                        {"job_id", job.config.job_id},
+                        {"name", job.config.name},
+                        {"stage", job.config.stage_name},
+                        {"status", to_string(job.status)},
+                        {"exit_code", job.exit_code},
+                        {"elapsed_sec", job.elapsed_sec},
+                        {"peak_rss_mb", job.peak_rss_mb},
+                        {"retry_count", job.retry_count}
+                    });
+                }
                 continue;
             }
 
@@ -802,6 +826,19 @@ void Scheduler::poll_running_jobs() {
                 sync_stage_manifest(job.config.stage_name);
                 progress_->on_job_finished(job.config.stage_name, job.config.job_id, job.config.name,
                                            job.status, job.exit_code, job.elapsed_sec);
+
+                if (remote_client_ && remote_client_->is_enabled()) {
+                    remote_client_->send_event("job_finished", {
+                        {"job_id", job.config.job_id},
+                        {"name", job.config.name},
+                        {"stage", job.config.stage_name},
+                        {"status", to_string(job.status)},
+                        {"exit_code", job.exit_code},
+                        {"elapsed_sec", job.elapsed_sec},
+                        {"peak_rss_mb", job.peak_rss_mb},
+                        {"retry_count", job.retry_count}
+                    });
+                }
             }
         }
     }
@@ -1055,10 +1092,44 @@ void Scheduler::tail_job(std::string_view target, size_t lines) {
 }
 
 void Scheduler::toggle_pause() {
-    dispatch_paused_ = !dispatch_paused_;
+    set_paused(!dispatch_paused_.load());
+}
+
+void Scheduler::set_paused(bool pause_state) {
+    dispatch_paused_.store(pause_state);
     std::cout << "\n[SCHEDULER] Job dispatching is now "
               << (dispatch_paused_ ? "PAUSED (active jobs will finish)" : "RESUMED")
               << std::endl;
+    if (remote_client_ && remote_client_->is_enabled()) {
+        remote_client_->send_event(dispatch_paused_ ? "scheduler_paused" : "scheduler_resumed",
+                                  {{"status", dispatch_paused_ ? "PAUSED" : "RUNNING"}});
+    }
+}
+
+void Scheduler::set_remote_client(RemoteServerClient* client) {
+    remote_client_ = client;
+    if (remote_client_) {
+        remote_client_->set_command_handler([this](const std::string& action, const nlohmann::json& payload) {
+            if (action == "pause") {
+                set_paused(true);
+            } else if (action == "resume") {
+                set_paused(false);
+            } else if (action == "abort" || action == "kill_all" || action == "stop") {
+                abort_all();
+            } else if (action == "kill_job") {
+                std::string target = payload.value("job_id", "");
+                if (target.empty() && payload.contains("target")) {
+                    target = payload.value("target", "");
+                }
+                if (!target.empty()) {
+                    kill_job(target);
+                }
+            } else if (action == "scale_slots") {
+                size_t slots = payload.value("slots", (size_t)0);
+                if (slots > 0) scale_slots(slots);
+            }
+        });
+    }
 }
 
 void Scheduler::kill_job(std::string_view target) {
@@ -1112,16 +1183,38 @@ void Scheduler::abort_all() {
             sync_stage_manifest(job.config.stage_name);
         }
     }
+    if (remote_client_ && remote_client_->is_enabled()) {
+        remote_client_->send_event("pipeline_aborted", {{"reason", "abort_all executed"}});
+    }
 }
 
 bool Scheduler::run() {
     init_runtime_states();
     RuntimeMenu::init_signal_handlers(this);
 
+    // If remote reporting server is configured, start client
+    if (remote_client_ && remote_client_->is_enabled()) {
+        remote_client_->start();
+        auto initial_stats = compute_progress_stats();
+        remote_client_->send_event("pipeline_started", {
+            {"total_jobs", initial_stats.total_jobs},
+            {"max_parallel_jobs", max_slots_.load()}
+        });
+    }
+
+    auto last_telemetry_time = std::chrono::steady_clock::now();
+
     // Global Pre-hook
     int global_pre_rc = execute_hook(config_.hooks, true);
     if (global_pre_rc != 0 && !config_.hooks.allow_failure) {
         CONDOR_LOG_ERROR("Global pipeline pre-hook failed with exit code " + std::to_string(global_pre_rc));
+        if (remote_client_ && remote_client_->is_enabled()) {
+            remote_client_->send_event("pipeline_finished", {
+                {"success", false},
+                {"reason", "Global pipeline pre-hook failed"}
+            });
+            remote_client_->stop();
+        }
         return false;
     }
 
@@ -1147,6 +1240,39 @@ bool Scheduler::run() {
         auto active = get_active_job_infos();
         progress_->update(stats, stages, active);
 
+        // Stream real-time telemetry frame to server
+        auto now = std::chrono::steady_clock::now();
+        if (remote_client_ && remote_client_->is_enabled()) {
+            int interval_ms = config_.settings.server.poll_interval_ms;
+            if (interval_ms <= 0) interval_ms = 500;
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_telemetry_time).count() >= interval_ms) {
+                last_telemetry_time = now;
+                nlohmann::json tel;
+                tel["status"] = dispatch_paused_ ? "PAUSED" : (aborted_ ? "ABORTED" : "RUNNING");
+                tel["progress"] = {
+                    {"total_jobs", stats.total_jobs},
+                    {"queued_jobs", stats.queued_jobs},
+                    {"running_jobs", stats.running_jobs},
+                    {"passed_jobs", stats.passed_jobs},
+                    {"failed_jobs", stats.failed_jobs},
+                    {"skipped_jobs", stats.skipped_jobs},
+                    {"elapsed_sec", stats.elapsed_sec}
+                };
+                nlohmann::json act_arr = nlohmann::json::array();
+                for (const auto& a : active) {
+                    act_arr.push_back({
+                        {"job_id", a.job_id},
+                        {"stage", a.stage_name},
+                        {"name", a.job_name},
+                        {"pid", a.pid_or_grid_id},
+                        {"elapsed_sec", a.elapsed_sec}
+                    });
+                }
+                tel["active_jobs"] = act_arr;
+                remote_client_->send_telemetry(tel);
+            }
+        }
+
         // Check if all jobs are done
         bool all_done = true;
         for (const auto& [jid, job] : jobs_) {
@@ -1171,6 +1297,18 @@ bool Scheduler::run() {
     if (global_post_rc != 0 && !config_.hooks.allow_failure) {
         CONDOR_LOG_ERROR("Global pipeline post-hook failed with exit code " + std::to_string(global_post_rc));
         pipeline_success = false;
+    }
+
+    // Emit final server status event
+    if (remote_client_ && remote_client_->is_enabled()) {
+        remote_client_->send_event("pipeline_finished", {
+            {"success", pipeline_success},
+            {"passed_jobs", final_stats.passed_jobs},
+            {"failed_jobs", final_stats.failed_jobs},
+            {"total_jobs", final_stats.total_jobs},
+            {"elapsed_sec", final_stats.elapsed_sec}
+        });
+        remote_client_->stop();
     }
 
     // Generate tool-agnostic HTML report (includes all stage and job hook logs)
