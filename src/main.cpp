@@ -76,6 +76,7 @@ int main(int argc, char** argv) {
     bool relative_paths{false};
     bool absolute_paths{false};
     std::vector<std::string> defined_variables;
+    std::vector<std::string> defined_resources;
     bool dry_run{false};
     bool no_interactive{false};
     bool verbose_logging{false};
@@ -84,6 +85,9 @@ int main(int argc, char** argv) {
     std::vector<std::string> stage_modes_cli;
     int grid_poll_interval_sec{0};
     std::string junit_xml_path;
+    int kill_grace_period_sec{-1};
+    size_t max_retained_runs{0};
+    bool purge_successful_logs{false};
 
     // CLI Options per specification
     app.add_option("pipeline_file,--pipeline-config", pipeline_config_path, "Path to pipeline YAML configuration")
@@ -103,12 +107,19 @@ int main(int argc, char** argv) {
     app.add_option("--path-style", path_style_str, "Path representation inside runs (absolute, relative)");
     app.add_flag("--relative-paths", relative_paths, "Use relative paths inside runs (equivalent to --path-style=relative)");
     app.add_flag("--absolute-paths", absolute_paths, "Use absolute paths inside runs (equivalent to --path-style=absolute)");
-    app.add_option("--define-variable", defined_variables, "Define or override configuration variables (KEY=VAL, repeatable)");
+    app.add_option("--define-variable", defined_variables, "Define or override configuration variables (KEY=VAL, repeatable)")
+       ->allow_extra_args(false);
+    app.add_option("--define-resource,--resource", defined_resources, "Define or override resource pool capacities (NAME=CAPACITY, repeatable)")
+       ->allow_extra_args(false);
     app.add_option("--rerun", rerun_base_dir, "Base run directory to re-run from (supports incremental rerun of failed jobs)");
-    app.add_option("--stage-mode", stage_modes_cli, "Override stage execution mode (STAGE:MODE where mode is full, failed_only, cached; repeatable)");
+    app.add_option("--stage-mode", stage_modes_cli, "Override stage execution mode (STAGE:MODE where mode is full, failed_only, cached; repeatable)")
+       ->allow_extra_args(false);
     app.add_option("--grid-poll-interval-sec", grid_poll_interval_sec, "Polling interval in seconds for cluster/grid backends (default: 10)");
     auto* junit_opt = app.add_option("--junit-xml", junit_xml_path, "Emit JUnit/xUnit XML test report to file (default: junit_report.xml)")
        ->expected(0, 1);
+    app.add_option("--kill-grace-period-sec", kill_grace_period_sec, "Grace period in seconds between SIGTERM and SIGKILL during cancellation (default: 3)");
+    auto* max_ret_opt = app.add_option("--max-retained-runs", max_retained_runs, "Maximum past run directories to retain in base_output_dir (0 = keep all)");
+    app.add_flag("--purge-successful-logs", purge_successful_logs, "Delete stdout.log, stderr.err, and runner scripts of passed jobs to conserve disk space");
     app.add_flag("--dry-run", dry_run, "Validate stage names, DAG cycles, evaluate conditions, print plan, and exit");
     app.add_flag("--no-interactive", no_interactive, "Disable interactive stdin polling and ANSI progress redraws (CI mode)");
     app.add_flag("--verbose-logging", verbose_logging, "Enable detailed scheduler event logging");
@@ -140,7 +151,11 @@ int main(int argc, char** argv) {
         std::exit(0);
     }, "List all available execution backends discovered on system and exit");
 
-    CLI11_PARSE(app, argc, argv);
+    try {
+        app.parse(argc, argv);
+    } catch (const CLI::ParseError& e) {
+        return app.exit(e);
+    }
 
     if (pipeline_config_path.empty()) {
         std::cerr << "Error: pipeline YAML configuration file is required.\n"
@@ -182,6 +197,42 @@ int main(int argc, char** argv) {
     } catch (const ConfigurationError& e) {
         std::cerr << e.what() << std::endl;
         return 1;
+    }
+
+    // Apply CLI overrides to resources
+    for (const auto& rdef : defined_resources) {
+        auto eq_pos = rdef.find('=');
+        if (eq_pos == std::string::npos || eq_pos == 0 || eq_pos == rdef.size() - 1) {
+            std::cerr << "Configuration error: --resource expects NAME=CAPACITY (e.g. vcs=4), got: " << rdef << std::endl;
+            return 1;
+        }
+        std::string rname = rdef.substr(0, eq_pos);
+        std::string rcap_str = rdef.substr(eq_pos + 1);
+        if (!is_valid_identifier(rname)) {
+            std::cerr << "Configuration error: Resource name '" << rname
+                      << "' violates identifier rules (must match ^[a-zA-Z0-9_-]+$)." << std::endl;
+            return 1;
+        }
+        try {
+            int cap = std::stoi(rcap_str);
+            if (cap <= 0) {
+                std::cerr << "Configuration error: Resource '" << rname
+                          << "' capacity must be greater than 0, got: " << cap << std::endl;
+                return 1;
+            }
+            config.resources[rname] = cap;
+        } catch (...) {
+            std::cerr << "Configuration error: Invalid resource capacity in '" << rdef << "'." << std::endl;
+            return 1;
+        }
+    }
+    if (!defined_resources.empty()) {
+        try {
+            YamlParser::validate(config);
+        } catch (const ConfigurationError& e) {
+            std::cerr << e.what() << std::endl;
+            return 1;
+        }
     }
 
     // Apply CLI overrides to settings
@@ -277,6 +328,16 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (kill_grace_period_sec >= 0) {
+        config.settings.kill_grace_period_sec = kill_grace_period_sec;
+    }
+    if (max_ret_opt->count() > 0) {
+        config.settings.max_retained_runs = max_retained_runs;
+    }
+    if (purge_successful_logs) {
+        config.settings.purge_successful_logs = true;
+    }
+
     config.settings.dry_run = dry_run;
     config.settings.no_interactive = no_interactive;
     config.settings.verbose_logging = verbose_logging;
@@ -299,11 +360,27 @@ int main(int argc, char** argv) {
                       << (!config.settings.junit_xml_path.empty() ? config.settings.junit_xml_path : "<run_dir>/artifacts/junit_report.xml")
                       << "\n";
         }
+        if (config.settings.kill_grace_period_sec != 3) {
+            std::cout << "Kill Grace Period:   " << config.settings.kill_grace_period_sec << "s\n";
+        }
+        if (config.settings.max_retained_runs > 0) {
+            std::cout << "Max Retained Runs:   " << config.settings.max_retained_runs << "\n";
+        }
+        if (config.settings.purge_successful_logs) {
+            std::cout << "Purge Passed Logs:   true\n";
+        }
         std::cout << "----------------------------------------------------------------\n"
                   << "Defined Variables:\n";
         for (const auto& [k, v] : config.variables.variables()) {
             std::cout << "  " << k << " = \"" << v << "\" (Exported as "
                       << VariableManager::to_env_key(k) << ")\n";
+        }
+        if (!config.resources.empty()) {
+            std::cout << "----------------------------------------------------------------\n"
+                      << "Resource Pools:\n";
+            for (const auto& [rname, cap] : config.resources) {
+                std::cout << "  " << rname << " = " << cap << " tokens\n";
+            }
         }
         std::cout << "----------------------------------------------------------------\n"
                   << "Stages & Jobs Plan:\n";
@@ -361,6 +438,20 @@ int main(int argc, char** argv) {
                 }
                 if (job.timeout_sec > 0) {
                     std::cout << "      Timeout: " << job.timeout_sec << "s\n";
+                }
+                if (job.retry > 0) {
+                    std::cout << "      Retry:   " << job.retry << " (delay: " << job.retry_delay_sec << "s)\n";
+                }
+                if (job.container.has_value()) {
+                    std::cout << "      Container: " << job.container->backend << " (" << job.container->image << ")\n";
+                }
+                if (!job.resources.empty()) {
+                    std::cout << "      Resources: ";
+                    size_t ri = 0;
+                    for (const auto& [rname, req] : job.resources) {
+                        std::cout << rname << "=" << req << (++ri < job.resources.size() ? ", " : "");
+                    }
+                    std::cout << "\n";
                 }
                 std::cout << "      Status:  " << (job_enabled ? "QUEUED" : "SKIPPED") << "\n"
                           << "      Path:    " << job_path_str << "\n";

@@ -34,6 +34,7 @@
 #include <fcntl.h>
 #include <cstring>
 #include <fstream>
+#include <deque>
 
 namespace condor {
 
@@ -370,6 +371,7 @@ bool Scheduler::is_stage_ready(const StageRuntimeState& stage) const {
 
 bool Scheduler::is_job_ready(const JobRuntimeState& job) const {
     if (job.status != JobStatus::QUEUED) return false;
+    if (std::chrono::steady_clock::now() < job.next_retry_time) return false;
 
     // Check job-level depends_on
     for (const auto& dep : job.config.depends_on) {
@@ -416,11 +418,15 @@ bool Scheduler::is_job_ready(const JobRuntimeState& job) const {
 void Scheduler::dispatch_ready_jobs() {
     if (dispatch_paused_ || aborted_) return;
 
-    // Count currently running jobs
+    // Count currently running jobs and active resource utilization
     size_t running_count = 0;
+    std::unordered_map<std::string, int> used_resources;
     for (const auto& [jid, job] : jobs_) {
         if (job.status == JobStatus::RUNNING) {
             running_count++;
+            for (const auto& [rname, req] : job.config.resources) {
+                used_resources[rname] += req;
+            }
         }
     }
 
@@ -467,6 +473,20 @@ void Scheduler::dispatch_ready_jobs() {
 
             auto& job = jobs_[jid];
             if (job.status == JobStatus::QUEUED && is_job_ready(job)) {
+                // Check resource availability
+                bool res_available = true;
+                for (const auto& [rname, req] : job.config.resources) {
+                    auto it = config_.resources.find(rname);
+                    int cap = (it != config_.resources.end()) ? it->second : 0;
+                    if (used_resources[rname] + req > cap) {
+                        res_available = false;
+                        break;
+                    }
+                }
+                if (!res_available) {
+                    continue;
+                }
+
                 // Dispatch job
                 auto ctx = std::make_unique<JobExecutionContext>();
                 ctx->job_id = job.config.job_id;
@@ -550,6 +570,19 @@ void Scheduler::dispatch_ready_jobs() {
                     job_vars.set(k, v);
                 }
 
+                // Inject allocated resource variables
+                std::string res_list;
+                for (const auto& [rname, req] : job.config.resources) {
+                    std::string env_key = "CONDOR_RESOURCE_" + rname;
+                    for (char& c : env_key) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    job_vars.set(env_key, std::to_string(req));
+                    if (!res_list.empty()) res_list += ",";
+                    res_list += rname + "=" + std::to_string(req);
+                }
+                if (!res_list.empty()) {
+                    job_vars.set("CONDOR_RESOURCES", res_list);
+                }
+
                 if (!job.config.working_dir.empty()) {
                     ctx->working_dir = job_vars.interpolate(job.config.working_dir);
                 }
@@ -564,11 +597,30 @@ void Scheduler::dispatch_ready_jobs() {
                     ctx->env_vars.emplace_back(VariableManager::to_env_key(k), v);
                     ctx->env_vars.emplace_back(k, v);
                 }
+                for (const auto& [rname, req] : job.config.resources) {
+                    std::string env_key = "CONDOR_RESOURCE_" + rname;
+                    for (char& c : env_key) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    ctx->env_vars.emplace_back(env_key, std::to_string(req));
+                }
+                if (!res_list.empty()) {
+                    ctx->env_vars.emplace_back("CONDOR_RESOURCES", res_list);
+                }
+
+                ctx->container = job.config.container;
+                ctx->kill_grace_period_sec = config_.settings.kill_grace_period_sec;
+                ctx->peak_rss_mb = job.peak_rss_mb;
+
+                job_vars.set("CONDOR_RETRY_COUNT", std::to_string(job.retry_count));
+                ctx->env_vars.emplace_back("CONDOR_RETRY_COUNT", std::to_string(job.retry_count));
 
                 job.backend->submit(*ctx);
                 job.status = JobStatus::RUNNING;
                 job.pid_or_grid_id = ctx->grid_id;
                 job.exec_ctx = std::move(ctx);
+
+                for (const auto& [rname, req] : job.config.resources) {
+                    used_resources[rname] += req;
+                }
 
                 running_count++;
                 progress_->on_job_started(stage.config.name, job.config.job_id, job.config.name);
@@ -596,6 +648,29 @@ void Scheduler::poll_running_jobs() {
                 job.exit_code = 124;
                 job.elapsed_sec = elapsed;
 
+                bool eligible_for_retry = (job.retry_count < job.config.retry);
+                if (eligible_for_retry && !job.config.retry_on_exit_codes.empty()) {
+                    eligible_for_retry = false;
+                    for (int code : job.config.retry_on_exit_codes) {
+                        if (code == 124) { eligible_for_retry = true; break; }
+                    }
+                }
+                if (eligible_for_retry) {
+                    job.retry_count++;
+                    job.status = JobStatus::QUEUED;
+                    job.exec_ctx.reset();
+                    CONDOR_LOG_WARN("Job " + jid + " (" + job.config.name + ") timed out; scheduling retry " +
+                                    std::to_string(job.retry_count) + "/" + std::to_string(job.config.retry) +
+                                    (job.config.retry_delay_sec > 0 ? " in " + std::to_string(job.config.retry_delay_sec) + "s" : "") + "...");
+                    if (job.config.retry_delay_sec > 0) {
+                        job.next_retry_time = now + std::chrono::seconds(job.config.retry_delay_sec);
+                    } else {
+                        job.next_retry_time = now;
+                    }
+                    sync_stage_manifest(job.config.stage_name);
+                    continue;
+                }
+
                 const auto* s = config_.find_stage(job.config.stage_name);
                 bool allow = job.config.allow_failure || (s && s->allow_failure);
                 if (allow) {
@@ -621,6 +696,8 @@ void Scheduler::poll_running_jobs() {
                 meta.status = job.status;
                 meta.exit_code = job.exit_code;
                 meta.elapsed_sec = job.elapsed_sec;
+                meta.peak_rss_mb = job.peak_rss_mb;
+                meta.retries = job.retry_count;
                 if (config_.settings.path_style == PathStyle::RELATIVE) {
                     meta.working_directory = ".";
                 } else {
@@ -646,13 +723,43 @@ void Scheduler::poll_running_jobs() {
             if (poll_res.finished) {
                 job.exit_code = poll_res.exit_code;
                 job.elapsed_sec = std::chrono::duration<double>(now - job.exec_ctx->start_time).count();
+                job.peak_rss_mb = std::max(job.peak_rss_mb, poll_res.peak_rss_mb);
+
+                if (job.exit_code == 137) {
+                    CONDOR_LOG_WARN("Job " + jid + " (" + job.config.name + ") exited with code 137 (OOM / SIGKILL)!");
+                }
 
                 if (poll_res.status == JobStatus::PASSED) {
                     job.status = JobStatus::PASSED;
                 } else if (poll_res.status == JobStatus::ABORTED) {
                     job.status = JobStatus::ABORTED;
                 } else {
-                    // Failed
+                    // Failed: check retry policy
+                    bool eligible_for_retry = (job.retry_count < job.config.retry);
+                    if (eligible_for_retry && !job.config.retry_on_exit_codes.empty()) {
+                        eligible_for_retry = false;
+                        for (int code : job.config.retry_on_exit_codes) {
+                            if (code == job.exit_code) { eligible_for_retry = true; break; }
+                        }
+                    }
+                    if (eligible_for_retry) {
+                        job.retry_count++;
+                        job.status = JobStatus::QUEUED;
+                        job.exec_ctx.reset();
+                        CONDOR_LOG_WARN("Job " + jid + " (" + job.config.name + ") failed with exit code " +
+                                        std::to_string(job.exit_code) + "; scheduling retry " +
+                                        std::to_string(job.retry_count) + "/" + std::to_string(job.config.retry) +
+                                        (job.config.retry_delay_sec > 0 ? " in " + std::to_string(job.config.retry_delay_sec) + "s" : "") + "...");
+                        if (job.config.retry_delay_sec > 0) {
+                            job.next_retry_time = now + std::chrono::seconds(job.config.retry_delay_sec);
+                        } else {
+                            job.next_retry_time = now;
+                        }
+                        sync_stage_manifest(job.config.stage_name);
+                        continue;
+                    }
+
+                    // Failed without retries
                     const auto* s = config_.find_stage(job.config.stage_name);
                     bool allow = job.config.allow_failure || (s && s->allow_failure);
                     if (allow) {
@@ -683,6 +790,8 @@ void Scheduler::poll_running_jobs() {
                 meta.status = job.status;
                 meta.exit_code = job.exit_code;
                 meta.elapsed_sec = job.elapsed_sec;
+                meta.peak_rss_mb = job.peak_rss_mb;
+                meta.retries = job.retry_count;
                 if (config_.settings.path_style == PathStyle::RELATIVE) {
                     meta.working_directory = ".";
                 } else {
@@ -795,8 +904,8 @@ std::vector<ActiveJobInfo> Scheduler::get_active_job_infos() const {
 
 void Scheduler::print_status_table() {
     std::lock_guard<std::mutex> lock(mutex_);
-    int cols = get_terminal_width(95);
-    int div_len = std::max(cols, 95);
+    int cols = get_terminal_width(108);
+    int div_len = std::max(cols, 108);
     std::string div(div_len, '=');
 
     std::cout << "\n"
@@ -807,6 +916,7 @@ void Scheduler::print_status_table() {
               << std::setw(16) << "STATUS"
               << std::setw(12) << "PID/GRID"
               << std::setw(10) << "ELAPSED"
+              << std::setw(12) << "PEAK_RSS"
               << "DIRECTORY\n";
     std::cout << div << "\n";
 
@@ -819,6 +929,13 @@ void Scheduler::print_status_table() {
                 elapsed = std::chrono::duration<double>(now - job.exec_ctx->start_time).count();
             }
 
+            std::string rss_str = "-";
+            if (job.peak_rss_mb > 0.0) {
+                std::ostringstream rss_ss;
+                rss_ss << std::fixed << std::setprecision(1) << job.peak_rss_mb << " MB";
+                rss_str = rss_ss.str();
+            }
+
             std::cout << std::left
                       << std::setw(8)  << job.config.job_id
                       << std::setw(20) << job.config.name
@@ -826,11 +943,115 @@ void Scheduler::print_status_table() {
                       << std::setw(16) << to_string(job.status)
                       << std::setw(12) << job.pid_or_grid_id
                       << std::setw(10) << ProgressDisplay::format_duration(elapsed)
+                      << std::setw(12) << rss_str
                       << workspace_.job_dir(job.config.stage_name, job.config.job_id).string()
                       << "\n";
         }
     }
-    std::cout << div << std::endl;
+    std::cout << div << "\n";
+    if (!config_.resources.empty()) {
+        std::unordered_map<std::string, int> active_res;
+        for (const auto& [jid, job] : jobs_) {
+            if (job.status == JobStatus::RUNNING) {
+                for (const auto& [rname, req] : job.config.resources) {
+                    active_res[rname] += req;
+                }
+            }
+        }
+        std::cout << "Resources: ";
+        size_t ri = 0;
+        for (const auto& [rname, cap] : config_.resources) {
+            int used = active_res[rname];
+            std::cout << rname << ": " << used << "/" << cap << " used"
+                      << (++ri < config_.resources.size() ? " | " : "");
+        }
+        std::cout << "\n" << div << "\n";
+    }
+    std::cout << std::endl;
+}
+
+void Scheduler::tail_job(std::string_view target, size_t lines) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const JobRuntimeState* found_job = nullptr;
+
+    if (target.empty()) {
+        for (const auto& [jid, job] : jobs_) {
+            if (job.status == JobStatus::RUNNING) {
+                found_job = &job;
+                break;
+            }
+        }
+        if (!found_job) {
+            std::cout << "\n[SCHEDULER] No active running jobs to tail. Specify a job ID (e.g. 't 0001').\n";
+            return;
+        }
+    } else {
+        auto it = jobs_.find(std::string(target));
+        if (it != jobs_.end()) {
+            found_job = &it->second;
+        } else {
+            for (const auto& [jid, job] : jobs_) {
+                if (job.config.job_id == target || job.config.name == target) {
+                    found_job = &job;
+                    break;
+                }
+            }
+        }
+        if (!found_job) {
+            std::cout << "\n[SCHEDULER] Job ID or Name '" << target << "' not found.\n";
+            return;
+        }
+    }
+
+    auto job_dir = workspace_.job_dir(found_job->config.stage_name, found_job->config.job_id);
+    auto stdout_path = job_dir / "stdout.log";
+    auto stderr_path = job_dir / "stderr.err";
+
+    auto tail_file = [](const std::filesystem::path& p, size_t n_lines) -> std::vector<std::string> {
+        std::vector<std::string> res;
+        if (!std::filesystem::exists(p)) return res;
+        std::ifstream ifs(p);
+        if (!ifs) return res;
+        std::string line;
+        std::deque<std::string> dq;
+        while (std::getline(ifs, line)) {
+            dq.push_back(line);
+            if (dq.size() > n_lines) dq.pop_front();
+        }
+        return std::vector<std::string>(dq.begin(), dq.end());
+    };
+
+    int cols = get_terminal_width(80);
+    std::string div(std::clamp(cols, 60, 100), '=');
+    std::string sub_div(std::clamp(cols, 60, 100), '-');
+
+    std::cout << "\n" << div << "\n"
+              << "Tail: Job " << found_job->config.job_id << " (" << found_job->config.name << ")"
+              << " | Stage: " << found_job->config.stage_name
+              << " | Status: " << to_string(found_job->status)
+              << "\n" << div << "\n";
+
+    auto out_lines = tail_file(stdout_path, lines);
+    std::cout << "--- Standard Output (" << stdout_path.string() << ") ---\n";
+    if (out_lines.empty()) {
+        std::cout << "(stdout is empty or log file not yet created)\n";
+    } else {
+        for (const auto& l : out_lines) {
+            std::cout << l << "\n";
+        }
+    }
+
+    if (std::filesystem::exists(stderr_path)) {
+        auto err_lines = tail_file(stderr_path, lines);
+        if (!err_lines.empty()) {
+            std::cout << sub_div << "\n"
+                      << "--- Standard Error (" << stderr_path.string() << ") ---\n";
+            for (const auto& l : err_lines) {
+                std::cout << l << "\n";
+            }
+        }
+    }
+    std::cout << div << "\n" << std::endl;
 }
 
 void Scheduler::toggle_pause() {
@@ -955,6 +1176,24 @@ bool Scheduler::run() {
     // Generate tool-agnostic HTML report (includes all stage and job hook logs)
     std::filesystem::path report_html_path = workspace_.artifacts_dir() / "report.html";
     HtmlReportGenerator::write_report(report_html_path, config_, workspace_, stages_, jobs_, final_stats, pipeline_success);
+
+    // Purge successful job logs if enabled to conserve disk space
+    if (config_.settings.purge_successful_logs) {
+        for (const auto& [jid, job] : jobs_) {
+            if (job.status == JobStatus::PASSED) {
+                auto jdir = workspace_.job_dir(job.config.stage_name, job.config.job_id);
+                std::error_code ec;
+                std::filesystem::remove(jdir / "stdout.log", ec);
+                std::filesystem::remove(jdir / "stderr.err", ec);
+                std::filesystem::remove(jdir / "job_runner.sh", ec);
+            }
+        }
+    }
+
+    // Prune historical runs if retention limit set
+    if (config_.settings.max_retained_runs > 0) {
+        workspace_.prune_old_runs(config_.settings.max_retained_runs);
+    }
 
     if (config_.settings.emit_junit_xml) {
         std::filesystem::path junit_path = !config_.settings.junit_xml_path.empty()

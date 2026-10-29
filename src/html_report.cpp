@@ -1077,6 +1077,15 @@ std::string HtmlReportGenerator::generate(
                   << escape_html(primary) << R"HTML(")">&#128196; HTML Report &#8599;</a>
 )HTML";
             }
+            if (job.retry_count > 0) {
+                h << R"HTML(                            <span title="Retries">&#128257; Retry: )HTML" << job.retry_count << R"HTML(</span>
+)HTML";
+            }
+            if (job.peak_rss_mb > 0.0) {
+                h << R"HTML(                            <span title="Peak Memory RSS">&#128190; RSS: )HTML"
+                  << std::fixed << std::setprecision(1) << job.peak_rss_mb << R"HTML( MB</span>
+)HTML";
+            }
             h << R"HTML(                            <span>Exit: )HTML" << job.exit_code << R"HTML(</span>
                             <span>)HTML" << std::fixed << std::setprecision(3) << job.elapsed_sec << R"HTML(s</span>
                             <span class="chevron">&#9660;</span>
@@ -1093,6 +1102,24 @@ std::string HtmlReportGenerator::generate(
               << escape_html(display_job_dir) << R"HTML(</div>
                         </div>
 )HTML";
+
+            if (job.peak_rss_mb > 0.0 || job.retry_count > 0) {
+                h << R"HTML(                        <div class="detail-row">
+                            <div class="detail-label">Execution Diagnostics</div>
+                            <div style="font-size: 13px; color: var(--text-muted); font-family: var(--font-mono);">)HTML";
+                if (job.peak_rss_mb > 0.0) {
+                    h << R"HTML(Peak Memory (RSS): )HTML" << std::fixed << std::setprecision(2) << job.peak_rss_mb << R"HTML( MB)HTML";
+                }
+                if (job.peak_rss_mb > 0.0 && job.retry_count > 0) {
+                    h << R"HTML( &bull; )HTML";
+                }
+                if (job.retry_count > 0) {
+                    h << R"HTML(Retries: )HTML" << job.retry_count << R"HTML( / )HTML" << job.config.retry;
+                }
+                h << R"HTML(</div>
+                        </div>
+)HTML";
+            }
 
             if (!html_reports.empty()) {
                 h << R"HTML(                        <div class="detail-row">

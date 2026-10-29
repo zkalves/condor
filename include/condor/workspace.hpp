@@ -41,6 +41,8 @@ struct JobMetadata {
     int exit_code{0};              ///< Final exit code recorded upon completion.
     double elapsed_sec{0.0};       ///< Job duration in seconds.
     std::string working_directory; ///< Filesystem working directory where job was executed.
+    double peak_rss_mb{0.0};       ///< Peak resident set size (memory) consumed in MB.
+    int retries{0};                ///< Number of retried attempts executed for this job.
 };
 
 /**
@@ -174,6 +176,12 @@ public:
      * @brief Atomically creates or updates the `latest` symlink in base_dir pointing to run_dir.
      */
     void update_latest_symlink();
+
+    /**
+     * @brief Prunes older historical run folders in base_dir exceeding max_retained count.
+     * @param max_retained Number of latest run folders to retain (older ones removed).
+     */
+    void prune_old_runs(size_t max_retained);
 
     /**
      * @brief Generates a timestamped execution folder name formatted as `YYYYMMDD_HHMMSS_<random6>`.

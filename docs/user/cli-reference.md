@@ -16,31 +16,36 @@ condor [OPTIONS] <pipeline.yaml>
 
 | Option | Argument | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `pipeline_file` | `<path>` | *(Required)* | Path to the pipeline YAML configuration file. Can be specified positionally or via `--pipeline-config`. |
+| `pipeline_file`, `--pipeline-config` | `<path>` | *(Required)* | Path to the pipeline YAML configuration file. Can be specified positionally or via `--pipeline-config`. |
 | `--stage` | `<name>` | All stages | Execute only the specified stage. Must match POSIX identifier rules (`^[a-zA-Z0-9_-]+$`). |
 | `--max-parallel-jobs` | `<N>` | Hardware concurrency | Maximum concurrent local jobs executed simultaneously. |
+| `--count-multiplier` | `<N>` | `1` | Multiplier for scalable job counts across the pipeline. |
 | `--base-output-dir` | `<path>` | `./condor_runs` | Base directory where timestamped run directories are created. |
 | `--run-dir` | `<path>` | Auto-generated | Run inside an explicit fixed directory rather than generating a timestamped folder. |
 | `-b`, `--backend`, `--backend-override` | `<name>` | Pipeline default | Set or override execution backend for all jobs (e.g. `local`, `slurm`, `lsf`, `sge`). |
 | `--on-failure-action`| `abort`, `continue`, `stage_barrier` | `abort` | Override failure handling policy when a job fails. |
 | `--exit-zero-on-failure`| None (Flag) | `false` | Return exit status code `0` even if individual jobs or stages encounter failures. |
 | `--status-interval-sec`| `<seconds>` | `30` | Interval in seconds to output periodic status summary dumps in non-interactive CI mode. |
-| `--count-multiplier`   | `<N>` | `1` | Multiplier for scalable job counts across the pipeline. |
-| `--rerun`              | `<path>` | None | Base run directory to incrementally re-run failures from. |
-| `--stage-mode`         | `<stage>:<mode>` | Configured in YAML | Override stage execution mode (`full`, `failed_only`, `cached`). Repeatable. |
-| `--grid-poll-interval-sec` | `<seconds>` | `10` | Polling interval in seconds for cluster/grid backends. |
-| `--junit-xml`          | `<path>` | `artifacts/junit_report.xml` | Emit standard JUnit/xUnit XML test report to file. |
 | `--output-mode` | `all`, `failures`, `summary` | `all` | Terminal event reporting verbosity. |
 | `--path-style` | `absolute`, `relative` | `absolute` | Path representation inside runs. |
 | `--relative-paths` | None (Flag) | `false` | Convenience flag to enable relative paths inside runs (equivalent to `--path-style=relative`). |
 | `--absolute-paths` | None (Flag) | `true` | Convenience flag to force absolute paths inside runs (equivalent to `--path-style=absolute`). |
 | `--define-variable` | `<KEY=VAL>` | None | Define or override pipeline variables from the command line. Repeatable for multiple variables. |
+| `--define-resource`, `--resource` | `<NAME=CAPACITY>` | None | Define or override named resource pool capacities (e.g. `vcs=8`, `fpga=2`). Repeatable. |
+| `--rerun` | `<path>` | None | Base run directory to incrementally re-run failures from. |
+| `--stage-mode` | `<stage>:<mode>` | Configured in YAML | Override stage execution mode (`full`, `failed_only`, `cached`). Repeatable. |
+| `--grid-poll-interval-sec` | `<seconds>` | `10` | Polling interval in seconds for cluster/grid backends. |
+| `--junit-xml` | `<path>` | `artifacts/junit_report.xml` | Emit standard JUnit/xUnit XML test report to file. |
+| `--kill-grace-period-sec` | `<seconds>` | `3` | Grace period in seconds between SIGTERM and SIGKILL during cancellation. |
+| `--max-retained-runs` | `<N>` | `0` (keep all) | Maximum past run directories to retain in base_output_dir (0 = unlimited). |
+| `--purge-successful-logs` | None (Flag) | `false` | Delete stdout.log, stderr.err, and runner scripts of passed jobs to conserve disk space. |
 | `--dry-run` | None (Flag) | `false` | Validate YAML syntax, verify stage names, check for DAG cycles, evaluate conditions, print plan, and exit. |
 | `--no-interactive` | None (Flag) | `false` | Disable interactive stdin polling and ANSI progress bar redraws. Recommended for CI logs. |
 | `--verbose-logging`| None (Flag) | `false` | Enable detailed scheduler debug logging to stderr. |
-| `--list-backends`  | None (Flag) | None | Discover and list all available execution backends on the system and exit. |
-| `--warranty`       | None (Flag) | None | Display GNU General Public License warranty disclaimer and exit. |
-| `--license`        | None (Flag) | None | Display GNU General Public License redistribution conditions and exit. |
+| `--list-backends` | None (Flag) | None | Discover and list all available execution backends on the system and exit. |
+| `--warranty` | None (Flag) | None | Display GNU General Public License warranty disclaimer and exit. |
+| `--license` | None (Flag) | None | Display GNU General Public License redistribution conditions and exit. |
+| `-v`, `--version` | None (Flag) | None | Display program version information and exit. |
 | `-h`, `--help` | None (Flag) | None | Display command-line usage information and exit. |
 
 ---
@@ -98,8 +103,9 @@ Press **`m`** or **`Ctrl+C`** at any time to open the interactive runtime contro
 
 | Command | Action | Description |
 | :---: | :--- | :--- |
-| **`s`** | **Status Table** | Prints an immediate, detailed tabular dump of all stages, jobs, PIDs, grid IDs, and statuses. |
+| **`s`** | **Status Table** | Prints an immediate, detailed tabular dump of all stages, jobs, PIDs, grid IDs, Peak RSS, and statuses. |
 | **`p`** | **Pause / Resume** | Toggles scheduler dispatching. Pauses new job dispatches or resumes queued dispatches. |
+| **`t <id>`** | **Tail Job Log** | Views the last 25 lines of stdout and stderr for a running or completed job without leaving the menu. |
 | **`k <id>`** | **Kill Job** | Terminates an active job by its 4-digit job ID (e.g. `k 0002`). |
 | **`j <N>`** | **Scale Slots** | Dynamically adjusts the maximum concurrent worker slots at runtime (e.g. `j 8`). |
 | **`w`** | **Warranty** | Displays the GNU General Public License warranty disclaimer (§15-17). |
@@ -129,4 +135,7 @@ Every job runner script (`job_runner.sh`) and hook script receives the following
 | `CONDOR_PATH_STYLE`| Configured path style | `relative` | `absolute` |
 | `CONDOR_OUTPUT_MODE`| Configured output mode | `summary` | `summary` |
 | `CONDOR_PIPELINE_DIR`| Directory containing the pipeline configuration | `../../../../examples/hardware_test/scripts` | `/home/user/project/examples/hardware_test/scripts` |
+| `CONDOR_RESOURCE_<NAME>`| Allocated token count for a named resource pool (e.g. `CONDOR_RESOURCE_VCS`) | `1` | `1` |
+| `CONDOR_RESOURCES` | Comma-separated list of allocated resources and counts | `vcs=1,fpga=1` | `vcs=1,fpga=1` |
+| `CONDOR_RETRY_COUNT` | Current retry attempt number (0 for initial run, 1 for first retry) | `0` | `0` |
 | `CONDOR_VAR_<KEY>` | Exported user and configuration variables | Varies | Varies |

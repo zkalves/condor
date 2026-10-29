@@ -407,3 +407,176 @@ stages:
     std::filesystem::remove_all(base_dir, ec);
     std::filesystem::remove_all(rerun_dir, ec);
 }
+
+TEST_CASE(scheduler_resource_semaphore_throttling) {
+    std::string test_yaml = R"(
+name: test_resource_throttling
+resources:
+  license_token: 1
+settings:
+  max_parallel_jobs: 4
+stages:
+  - name: sim
+    jobs:
+      - name: sim_a
+        command: "echo res=$CONDOR_RESOURCE_LICENSE_TOKEN all=$CONDOR_RESOURCES > out_a.txt && sleep 0.1"
+        resources:
+          license_token: 1
+      - name: sim_b
+        command: "echo res=$CONDOR_RESOURCE_LICENSE_TOKEN all=$CONDOR_RESOURCES > out_b.txt && sleep 0.1"
+        resources:
+          license_token: 1
+)";
+    std::string test_dir = "./test_sched_res";
+    std::error_code ec;
+    std::filesystem::remove_all(test_dir, ec);
+
+    auto config = YamlParser::parse_string(test_yaml);
+    config.settings.no_interactive = true;
+
+    WorkspaceManager ws(test_dir);
+    ws.initialize();
+
+    Scheduler scheduler(config, ws);
+    bool ok = scheduler.run();
+    ASSERT_TRUE(ok);
+
+    // Verify output files and environment variables
+    auto out_a = ws.run_dir() / "stages" / "sim" / "0001" / "out_a.txt";
+    auto out_b = ws.run_dir() / "stages" / "sim" / "0002" / "out_b.txt";
+    ASSERT_TRUE(std::filesystem::exists(out_a));
+    ASSERT_TRUE(std::filesystem::exists(out_b));
+
+    std::ifstream fa(out_a);
+    std::string line_a;
+    std::getline(fa, line_a);
+    ASSERT_TRUE(line_a.find("res=1") != std::string::npos);
+    ASSERT_TRUE(line_a.find("all=license_token=1") != std::string::npos);
+
+    std::ifstream fb(out_b);
+    std::string line_b;
+    std::getline(fb, line_b);
+    ASSERT_TRUE(line_b.find("res=1") != std::string::npos);
+    ASSERT_TRUE(line_b.find("all=license_token=1") != std::string::npos);
+
+    std::filesystem::remove_all(test_dir, ec);
+}
+
+TEST_CASE(scheduler_flaky_retry_success) {
+    std::string test_yaml = R"(
+name: test_retry_pipeline
+stages:
+  - name: test_flaky
+    jobs:
+      - name: flaky_job
+        command: "if [ ! -f marker.tmp ]; then touch marker.tmp && exit 42; else echo retry=$CONDOR_RETRY_COUNT > ok.txt && exit 0; fi"
+        retry: 2
+        retry_delay_sec: 0
+        retry_on_exit_codes: [42]
+)";
+    std::string test_dir = "./test_sched_retry";
+    std::error_code ec;
+    std::filesystem::remove_all(test_dir, ec);
+
+    auto config = YamlParser::parse_string(test_yaml);
+    config.settings.no_interactive = true;
+
+    WorkspaceManager ws(test_dir);
+    ws.initialize();
+
+    Scheduler scheduler(config, ws);
+    bool ok = scheduler.run();
+    ASSERT_TRUE(ok);
+
+    auto ok_txt = ws.run_dir() / "stages" / "test_flaky" / "0001" / "ok.txt";
+    ASSERT_TRUE(std::filesystem::exists(ok_txt));
+
+    std::ifstream ifs(ok_txt);
+    std::string line;
+    std::getline(ifs, line);
+    ASSERT_TRUE(line.find("retry=1") != std::string::npos);
+
+    // Verify job status yaml recorded retries
+    auto status_yaml = ws.run_dir() / "stages" / "test_flaky" / "0001" / "job_status.yaml";
+    ASSERT_TRUE(std::filesystem::exists(status_yaml));
+    std::ifstream yfs(status_yaml);
+    std::string yline;
+    bool found_retries = false;
+    while (std::getline(yfs, yline)) {
+        if (yline.find("retries: 1") != std::string::npos) found_retries = true;
+    }
+    ASSERT_TRUE(found_retries);
+
+    std::filesystem::remove_all(test_dir, ec);
+}
+
+TEST_CASE(scheduler_purge_successful_logs) {
+    std::string test_yaml = R"(
+name: test_purge_pipeline
+settings:
+  purge_successful_logs: true
+stages:
+  - name: stage_purge
+    jobs:
+      - name: pass_job
+        command: "echo 'passing job output'"
+      - name: fail_job
+        command: "echo 'failing job output' >&2 && exit 1"
+        allow_failure: true
+)";
+    std::string test_dir = "./test_sched_purge";
+    std::error_code ec;
+    std::filesystem::remove_all(test_dir, ec);
+
+    auto config = YamlParser::parse_string(test_yaml);
+    config.settings.no_interactive = true;
+
+    WorkspaceManager ws(test_dir);
+    ws.initialize();
+
+    Scheduler scheduler(config, ws);
+    bool ok = scheduler.run();
+    ASSERT_TRUE(ok);
+
+    auto pass_stdout = ws.run_dir() / "stages" / "stage_purge" / "0001" / "stdout.log";
+    auto fail_stderr = ws.run_dir() / "stages" / "stage_purge" / "0002" / "stderr.err";
+
+    // Successful job log purged
+    ASSERT_FALSE(std::filesystem::exists(pass_stdout));
+
+    // Failing job log preserved
+    ASSERT_TRUE(std::filesystem::exists(fail_stderr));
+
+    std::filesystem::remove_all(test_dir, ec);
+}
+
+TEST_CASE(scheduler_tail_job) {
+    std::string test_yaml = R"(
+name: test_tail_pipeline
+stages:
+  - name: test_stage
+    jobs:
+      - name: output_job
+        command: "echo 'Line A' && echo 'Line B' && echo 'Line C'"
+)";
+    std::string test_dir = "./test_sched_tail";
+    std::error_code ec;
+    std::filesystem::remove_all(test_dir, ec);
+
+    auto config = YamlParser::parse_string(test_yaml);
+    config.settings.no_interactive = true;
+
+    WorkspaceManager ws(test_dir);
+    ws.initialize();
+
+    Scheduler scheduler(config, ws);
+    bool ok = scheduler.run();
+    ASSERT_TRUE(ok);
+
+    // Call tail_job on finished job
+    scheduler.tail_job("0001", 10);
+    // Also tail non-existent job to verify graceful message
+    scheduler.tail_job("9999", 10);
+
+    std::filesystem::remove_all(test_dir, ec);
+}

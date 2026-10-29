@@ -45,6 +45,9 @@ struct JobRuntimeState {
     std::string pid_or_grid_id{"-"};                     ///< Process PID or cluster batch job identifier.
     std::unique_ptr<JobExecutionContext> exec_ctx;       ///< Active backend execution context.
     ExecutionBackend* backend{nullptr};                  ///< Pointer to assigned backend handler.
+    int retry_count{0};                                  ///< Number of times this job has been retried.
+    std::chrono::steady_clock::time_point next_retry_time; ///< Earliest time when next retry may be dispatched.
+    double peak_rss_mb{0.0};                             ///< Peak memory (RSS) observed in MB.
 };
 
 /**
@@ -107,6 +110,13 @@ public:
      * @param job_id Unique 4-digit identifier of job to kill (e.g. "0002").
      */
     void kill_job(std::string_view job_id);
+
+    /**
+     * @brief Prints recent stdout/stderr output lines for an active or completed job.
+     * @param target Job ID or job name to inspect (empty string selects first running job).
+     * @param lines Number of trailing lines to display (default 25).
+     */
+    void tail_job(std::string_view target = "", size_t lines = 25);
 
     /**
      * @brief Dynamically adjusts maximum concurrent execution slots at runtime.

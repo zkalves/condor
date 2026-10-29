@@ -155,6 +155,12 @@ void WorkspaceManager::write_job_status(std::string_view stage_name, const JobMe
         << "exit_code: " << meta.exit_code << "\n"
         << std::fixed << std::setprecision(3)
         << "elapsed_sec: " << meta.elapsed_sec << "\n";
+    if (meta.peak_rss_mb > 0.0) {
+        out << std::fixed << std::setprecision(2) << "peak_rss_mb: " << meta.peak_rss_mb << "\n";
+    }
+    if (meta.retries > 0) {
+        out << "retries: " << meta.retries << "\n";
+    }
     out.close();
 
     // 2. Write structured machine/human-readable job_status.yaml
@@ -168,8 +174,15 @@ void WorkspaceManager::write_job_status(std::string_view stage_name, const JobMe
               << "status: \"" << to_string(meta.status) << "\"\n"
               << "exit_code: " << meta.exit_code << "\n"
               << std::fixed << std::setprecision(3)
-              << "elapsed_sec: " << meta.elapsed_sec << "\n"
-              << "pid_or_grid_id: \"" << meta.pid_or_grid_id << "\"\n"
+              << "elapsed_sec: " << meta.elapsed_sec << "\n";
+        if (meta.peak_rss_mb > 0.0) {
+            y_out << std::fixed << std::setprecision(2)
+                  << "peak_rss_mb: " << meta.peak_rss_mb << "\n";
+        }
+        if (meta.retries > 0) {
+            y_out << "retries: " << meta.retries << "\n";
+        }
+        y_out << "pid_or_grid_id: \"" << meta.pid_or_grid_id << "\"\n"
               << "working_directory: \"" << wd << "\"\n"
               << "artifacts:\n"
               << "  stdout: \"stdout.log\"\n"
@@ -193,6 +206,36 @@ void WorkspaceManager::update_latest_symlink() {
             CONDOR_LOG_DEBUG("Could not atomically update latest symlink: " + ec.message());
             std::filesystem::remove(temp_link, ec);
         }
+    }
+}
+
+void WorkspaceManager::prune_old_runs(size_t max_retained) {
+    if (max_retained == 0) return;
+    std::error_code ec;
+    if (!std::filesystem::exists(base_dir_, ec)) return;
+
+    std::vector<std::filesystem::path> run_dirs;
+    for (const auto& entry : std::filesystem::directory_iterator(base_dir_, ec)) {
+        if (entry.is_directory() && !std::filesystem::is_symlink(entry.path(), ec)) {
+            std::string name = entry.path().filename().string();
+            if (name != "latest") {
+                run_dirs.push_back(entry.path());
+            }
+        }
+    }
+
+    if (run_dirs.size() <= max_retained) return;
+
+    std::sort(run_dirs.begin(), run_dirs.end());
+
+    while (run_dirs.size() > max_retained) {
+        auto oldest = run_dirs.front();
+        run_dirs.erase(run_dirs.begin());
+        if (oldest == run_dir_) {
+            break;
+        }
+        CONDOR_LOG_DEBUG("Pruning old run directory: " + oldest.string());
+        std::filesystem::remove_all(oldest, ec);
     }
 }
 
