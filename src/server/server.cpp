@@ -17,9 +17,9 @@
  * Copyright (C) 2026 Ezequiel Alves. All rights reserved.
  */
 
-#include "hub/server.hpp"
-#include "hub/crypto.hpp"
-#include "hub/dashboard_html.hpp"
+#include "server.hpp"
+#include "crypto.hpp"
+#include "dashboard_html.hpp"
 
 #include <iostream>
 #include <fstream>

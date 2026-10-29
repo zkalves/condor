@@ -161,7 +161,7 @@ Responsible for reading, expanding, and validating pipeline definitions:
 - **Bidirectional Event & Command Dispatch**: Dispatches events (`pipeline_started`, `job_started`, `job_finished`, `pipeline_aborted`, `pipeline_finished`) and streams real-time telemetry frames. Listens for incoming remote commands (`pause`, `resume`, `abort`, `kill_job`, `scale_slots`) and delegates them to the `Scheduler` via callbacks.
 - **Offline Invariant**: Completely disabled unless explicitly configured in YAML (`settings.server.enabled: true`) or CLI (`--server-url`). When disabled, no worker thread is created and no network operations are performed.
 
-### Subsystem 8: Condor Hub Server (server/include/hub/, server/src/)
-- **`HubServer` (`server/include/hub/server.hpp`, `server/src/server.cpp`)**: Asynchronous socket server utilizing Linux `epoll` and `eventfd` wakeup. Manages non-blocking TCP sockets, HTTP requests, and WebSocket handshakes (`compute_websocket_accept` in `crypto.hpp`).
-- **`FleetManager` (`server/include/hub/fleet_manager.hpp`, `server/src/fleet_manager.cpp`)**: Thread-safe registry and state machine tracking active and completed pipeline runs (`RunRecord`), active jobs (`ActiveJobRecord`), stage progression, and connected dashboard WebSocket clients.
-- **Embedded Web Dashboard (`server/include/hub/dashboard_html.hpp`)**: Single-page dark-mode dashboard served from memory with zero asset file dependencies. Visualizes live fleet metrics, active worker PIDs, and provides interactive control buttons.
+### Subsystem 8: Condor Hub Server (src/server/)
+- **`HubServer` (`src/server/server.hpp`, `src/server/server.cpp`)**: Asynchronous socket server utilizing Linux `epoll` and `eventfd` wakeup. Manages non-blocking TCP sockets, HTTP requests, and WebSocket handshakes (`compute_websocket_accept` in `crypto.hpp`).
+- **`FleetManager` (`src/server/fleet_manager.hpp`, `src/server/fleet_manager.cpp`)**: Thread-safe registry and state machine tracking active and completed pipeline runs (`RunRecord`), active jobs (`ActiveJobRecord`), stage progression, and connected dashboard WebSocket clients.
+- **Embedded Web Dashboard (`src/server/dashboard_html.hpp`)**: Single-page dark-mode dashboard served from memory with zero asset file dependencies. Visualizes live fleet metrics, active worker PIDs, and provides interactive control buttons.

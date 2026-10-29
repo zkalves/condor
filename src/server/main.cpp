@@ -21,7 +21,7 @@
 #include <csignal>
 #include <CLI/CLI.hpp>
 
-#include "hub/server.hpp"
+#include "server.hpp"
 
 static std::atomic<bool> g_shutdown_requested{false};
 
