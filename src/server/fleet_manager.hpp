@@ -51,6 +51,7 @@ public:
     void register_client(const std::string& run_id,
                          const std::string& pipeline,
                          const std::string& project,
+                         const std::string& owner,
                          const std::vector<std::string>& tags,
                          int client_fd);
 

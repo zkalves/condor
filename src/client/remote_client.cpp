@@ -487,7 +487,11 @@ void RemoteServerClient::worker_loop() {
                         hello["run_id"] = run_id_;
                         hello["pipeline"] = pipeline_name_;
                         hello["project"] = config_.project;
+                        hello["owner"] = config_.owner.empty() ? "anonymous" : config_.owner;
                         hello["tags"] = config_.tags;
+                        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count();
+                        hello["timestamp_ms"] = ms;
                         send_websocket_frame(hello.dump());
                     } else {
                         disconnect_socket();

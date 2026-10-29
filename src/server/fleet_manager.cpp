@@ -77,6 +77,7 @@ FleetManager::FleetManager() = default;
 void FleetManager::register_client(const std::string& run_id,
                                    const std::string& pipeline,
                                    const std::string& project,
+                                   const std::string& owner,
                                    const std::vector<std::string>& tags,
                                    int client_fd) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -85,6 +86,7 @@ void FleetManager::register_client(const std::string& run_id,
     run.run_id = run_id;
     run.pipeline = pipeline;
     run.project = project;
+    run.owner = owner.empty() ? "anonymous" : owner;
     run.tags = tags;
     run.client_socket_fd = client_fd;
     if (run.status == "UNKNOWN") {
@@ -132,7 +134,9 @@ void FleetManager::update_telemetry(const std::string& run_id, const nlohmann::j
         run.passed_jobs = p.value("passed_jobs", run.passed_jobs);
         run.failed_jobs = p.value("failed_jobs", run.failed_jobs);
         run.skipped_jobs = p.value("skipped_jobs", run.skipped_jobs);
-        run.completed_jobs = p.value("completed_jobs", run.passed_jobs + run.failed_jobs + run.skipped_jobs);
+        run.waiting_jobs = p.value("queued_jobs", p.value("waiting_jobs", 0));
+        run.other_jobs = p.value("other_jobs", run.other_jobs);
+        run.completed_jobs = p.value("completed_jobs", run.passed_jobs + run.failed_jobs + run.skipped_jobs + run.other_jobs);
         run.elapsed_sec = p.value("elapsed_sec", run.elapsed_sec);
     }
 
@@ -180,14 +184,16 @@ void FleetManager::record_event(const std::string& run_id, const std::string& ev
         } else if (event_type == "job_finished") {
             if (it->second.running_jobs > 0) it->second.running_jobs--;
             std::string st = payload.value("status", "");
-            if (st == "PASSED" || st == "FAILED (ALLOWED)") {
+            if (st == "PASSED") {
                 it->second.passed_jobs++;
+            } else if (st == "FAILED (ALLOWED)") {
+                it->second.other_jobs++;
             } else if (st == "SKIPPED") {
                 it->second.skipped_jobs++;
             } else {
                 it->second.failed_jobs++;
             }
-            it->second.completed_jobs = it->second.passed_jobs + it->second.failed_jobs + it->second.skipped_jobs;
+            it->second.completed_jobs = it->second.passed_jobs + it->second.failed_jobs + it->second.skipped_jobs + it->second.other_jobs;
             std::string jid = payload.value("job_id", "");
             std::string stg = payload.value("stage", "");
             it->second.active_jobs.erase(
@@ -198,6 +204,7 @@ void FleetManager::record_event(const std::string& run_id, const std::string& ev
             it->second.status = "ABORTED";
             it->second.active_jobs.clear();
             it->second.running_jobs = 0;
+            it->second.waiting_jobs = 0;
         } else if (event_type == "pipeline_finished") {
             bool success = payload.value("success", false);
             it->second.status = success ? "PASSED" : "FAILED";
@@ -205,10 +212,11 @@ void FleetManager::record_event(const std::string& run_id, const std::string& ev
             it->second.failed_jobs = payload.value("failed_jobs", it->second.failed_jobs);
             it->second.skipped_jobs = payload.value("skipped_jobs", it->second.skipped_jobs);
             it->second.total_jobs = payload.value("total_jobs", it->second.total_jobs);
-            it->second.completed_jobs = it->second.passed_jobs + it->second.failed_jobs + it->second.skipped_jobs;
+            it->second.completed_jobs = it->second.passed_jobs + it->second.failed_jobs + it->second.skipped_jobs + it->second.other_jobs;
             it->second.elapsed_sec = payload.value("elapsed_sec", it->second.elapsed_sec);
             it->second.active_jobs.clear();
             it->second.running_jobs = 0;
+            it->second.waiting_jobs = 0;
         } else if (event_type == "scheduler_paused") {
             it->second.status = "PAUSED";
         } else if (event_type == "scheduler_resumed") {

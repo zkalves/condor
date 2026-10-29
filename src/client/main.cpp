@@ -92,6 +92,7 @@ int main(int argc, char** argv) {
     std::string server_url;
     std::string server_token;
     std::string server_project;
+    std::string server_owner;
     std::vector<std::string> server_tags;
     int server_poll_ms{0};
 
@@ -132,6 +133,7 @@ int main(int argc, char** argv) {
     app.add_option("--server-url", server_url, "Central reporting server URL (e.g. ws://host:port/ws or http://host:port/api/v1/telemetry)");
     app.add_option("--server-token", server_token, "Authentication Bearer token for reporting server");
     app.add_option("--server-project", server_project, "Project identifier for central server reporting");
+    app.add_option("--server-owner,--owner", server_owner, "Owner or user identifier for pipeline run reporting");
     app.add_option("--server-tags", server_tags, "Tags for central server reporting (repeatable)")
        ->allow_extra_args(false);
     app.add_option("--server-poll-ms", server_poll_ms, "Interval in milliseconds between real-time telemetry updates (default: 500)");
@@ -358,6 +360,14 @@ int main(int argc, char** argv) {
     }
     if (!server_project.empty()) {
         config.settings.server.project = server_project;
+    }
+    if (!server_owner.empty()) {
+        config.settings.server.owner = server_owner;
+    }
+    if (config.settings.server.owner.empty()) {
+        const char* u = std::getenv("USER");
+        if (!u) u = std::getenv("LOGNAME");
+        config.settings.server.owner = u ? u : "anonymous";
     }
     if (!server_tags.empty()) {
         config.settings.server.tags = server_tags;
