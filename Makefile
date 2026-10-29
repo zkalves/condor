@@ -31,6 +31,7 @@ DESTDIR      ?=
 
 .PHONY: help all build build-offline build-custom download-deps vendor-deps test test-verbose \
         build-server build-hub run-server run-hub server hub run-remote \
+        run-verilator-remote run-verilator-coverage-remote \
         dry-run run-simple run-conditional run-coverage run-ci \
         run-verilator run-verilator-coverage \
         docs docs-doxygen docs-serve clean-docs \
@@ -61,6 +62,8 @@ help: ## Show this help message with all available targets
 	@echo "  build-server         Build Condor Hub server (condor-hub, alias: build-hub)"
 	@echo "  run-server           Start Condor Hub server (http://0.0.0.0:8080, aliases: server, run-hub, hub)"
 	@echo "  run-remote           Run example pipeline connected to Condor Hub (ws://127.0.0.1:8080/api/v1/ws)"
+	@echo "  run-verilator-remote Run Verilator ALU pipeline reporting to Condor Hub"
+	@echo "  run-verilator-coverage-remote Run Verilator ALU pipeline with coverage reporting to Condor Hub"
 	@echo ""
 	@echo "Documentation Flows:"
 	@echo "  docs                 Generate HTML documentation portal"
@@ -182,6 +185,14 @@ run-server run-hub server hub: $(HUB_BIN) ## Start Condor Hub reporting and remo
 run-remote: $(CONDOR_BIN) ## Run example pipeline reporting to Condor Hub
 	@echo "==> Executing examples/simple/scripts/pipeline.yaml connected to Condor Hub..."
 	@$(CONDOR_BIN) examples/simple/scripts/pipeline.yaml --server-url ws://127.0.0.1:$(HUB_PORT)/api/v1/ws $(if $(HUB_TOKEN),--server-token $(HUB_TOKEN),)
+
+run-verilator-remote: $(CONDOR_BIN) ## Run Verilator ALU pipeline reporting to Condor Hub
+	@echo "==> Executing Verilator ALU Pipeline connected to Condor Hub..."
+	@$(CONDOR_BIN) examples/verilator/scripts/pipeline.yaml --output-mode $(OUTPUT_MODE) --server-url ws://127.0.0.1:$(HUB_PORT)/api/v1/ws $(if $(HUB_TOKEN),--server-token $(HUB_TOKEN),) --server-project "Verilator ALU" --server-tags "rtl,sim,verilator"
+
+run-verilator-coverage-remote: $(CONDOR_BIN) ## Run Verilator ALU pipeline with coverage reporting to Condor Hub
+	@echo "==> Executing Verilator ALU Pipeline [WITH COVERAGE] connected to Condor Hub..."
+	@$(CONDOR_BIN) examples/verilator/scripts/pipeline.yaml --define-variable coverage=1 --output-mode $(OUTPUT_MODE) --server-url ws://127.0.0.1:$(HUB_PORT)/api/v1/ws $(if $(HUB_TOKEN),--server-token $(HUB_TOKEN),) --server-project "Verilator ALU" --server-tags "rtl,coverage,verilator"
 
 # ------------------------------------------------------------------------------
 # Pipeline Execution Flows
