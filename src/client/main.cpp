@@ -545,9 +545,7 @@ int main(int argc, char** argv) {
     std::cout << "[CONDOR] Launching pipeline '" << config.name << "'\n"
               << "[CONDOR] Active run directory: " << workspace.run_dir() << "\n"
               << "[CONDOR] Max concurrent slots: " << config.settings.max_parallel_jobs << "\n"
-              << "[CONDOR] Available keys:      [m] Runtime Menu | [Ctrl+C] Cancel / Abort\n"
-              << "[CONDOR] Emergency kill:       " << workspace.kill_script_path().string() << "\n"
-              << "                         (or: pkill -f '" << workspace.run_dir().string() << "')\n";
+              << "[CONDOR] Available keys:      [m] Runtime Menu | [Ctrl+C] Cancel / Abort\n";
 
     std::unique_ptr<RemoteServerClient> remote_client;
     if (config.settings.server.enabled && !config.settings.server.url.empty()) {

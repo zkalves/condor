@@ -121,6 +121,8 @@ TEST_CASE(workspace_emergency_kill_script) {
 
     auto script_path = ws.kill_script_path();
     ASSERT_TRUE(std::filesystem::exists(script_path));
+    ASSERT_TRUE(script_path.parent_path() == ws.pipeline_dir());
+    ASSERT_TRUE(ws.active_pids_path().parent_path() == ws.pipeline_dir());
 
     // Verify file permissions include execution
     auto perms = std::filesystem::status(script_path).permissions();

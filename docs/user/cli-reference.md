@@ -37,6 +37,7 @@ condor [OPTIONS] <pipeline.yaml>
 | `--grid-poll-interval-sec` | `<seconds>` | `10` | Polling interval in seconds for cluster/grid backends. |
 | `--junit-xml` | `<path>` | `artifacts/junit_report.xml` | Emit standard JUnit/xUnit XML test report to file. |
 | `--kill-grace-period-sec` | `<seconds>` | `3` | Grace period in seconds between SIGTERM and SIGKILL during cancellation. |
+| `--kill-run` | `<path>` | None | Emergency terminate all active jobs in the specified run directory (or `latest`) and exit. |
 | `--max-retained-runs` | `<N>` | `0` (keep all) | Maximum past run directories to retain in base_output_dir (0 = unlimited). |
 | `--purge-successful-logs` | None (Flag) | `false` | Delete stdout.log, stderr.err, and runner scripts of passed jobs to conserve disk space. |
 | `--dry-run` | None (Flag) | `false` | Validate YAML syntax, verify stage names, check for DAG cycles, evaluate conditions, print plan, and exit. |
@@ -101,11 +102,17 @@ In relative mode:
 
 ---
 
-## Interactive Runtime Menu Controls
+## Interactive Runtime Keyboard Controls
 
-During live interactive execution on a TTY, Condor listens asynchronously on `stdin` for keyboard interactions without interrupting active jobs.
+During live interactive execution on a TTY, Condor operates in a non-canonical, no-echo mode so that accidental keystrokes do not disrupt the ANSI progress display. It continuously listens asynchronously on `stdin` for control keys:
 
-Press **`m`** or **`Ctrl+C`** at any time to open the interactive runtime control menu:
+- **`m` (or `M`, `h`, `?`)**: Opens the interactive runtime control menu immediately without requiring `Enter`.
+- **`Ctrl+C` (Single Press)**: Pauses scheduler job dispatching and opens the runtime control menu.
+- **`Ctrl+C` (Double Press within 2 seconds)**: Triggers an immediate emergency hard kill (`SIGKILL`) across all active worker slots and aborts the pipeline.
+
+### Available Runtime Menu Commands
+
+When the menu is open, standard canonical input and line editing are re-enabled:
 
 | Command | Action | Description |
 | :---: | :--- | :--- |
@@ -119,7 +126,55 @@ Press **`m`** or **`Ctrl+C`** at any time to open the interactive runtime contro
 | **`c`** | **Continue** | Resumes the live ANSI progress display. |
 | **`q`** | **Quit / Abort All** | Signals all running process groups (`SIGTERM`/`SIGKILL`) and exits immediately. |
 
-@note **Emergency Double Ctrl+C**: Pressing `Ctrl+C` twice within 2 seconds bypasses the menu and immediately terminates all active process groups across all worker slots. In automated CI/CD pipelines (such as GitHub Actions, GitLab CI, or Jenkins), pass `--no-interactive` to disable terminal polling and avoid consuming pipeline stdin.
+@note In headless automated CI/CD pipelines (such as GitHub Actions, GitLab CI, or Jenkins), pass `--no-interactive` to disable terminal polling and avoid consuming pipeline stdin.
+
+---
+
+## Emergency Job Termination & Crash Recovery
+
+If the Condor CLI process is terminated abruptly (for example via `kill -9`, an unexpected crash, or a disconnected SSH session), worker processes running on the local host or cluster continue executing in their detached process groups (`setpgid`). Condor provides three reliable methods to terminate all orphaned jobs:
+
+### Method 1: Dedicated Kill Script (`pipeline/kill_jobs.sh`)
+During workspace initialization, Condor generates a self-contained, executable cleanup script located in the `pipeline/` directory of the run:
+
+```bash
+# Terminate all active jobs for the most recent run:
+./condor_runs/latest/pipeline/kill_jobs.sh
+
+# Or target an explicit run directory:
+./condor_runs/20261029_141500_123456/pipeline/kill_jobs.sh
+```
+
+**How it works**:
+1. Reads all currently active job process IDs from `<run_dir>/pipeline/active_pids.txt`.
+2. Sends `SIGTERM` to each process group (`-PID`) to permit graceful shutdown and artifact flushing.
+3. Waits up to 3 seconds grace period.
+4. Automatically escalates to `SIGKILL` (`kill -9 -PID`) for any stubborn surviving processes.
+5. Cleans up lingering worker processes matching `<run_dir>/stages` via `pkill`.
+6. Clears the `active_pids.txt` file upon completion.
+
+### Method 2: Condor CLI Option (`--kill-run`)
+You can invoke the Condor CLI directly from any terminal to perform emergency cleanup:
+
+```bash
+# Terminate all active jobs in the latest run:
+condor --kill-run latest
+
+# Or specify an explicit run directory:
+condor --kill-run ./condor_runs/20261029_141500_123456
+```
+
+### Method 3: Direct Shell Process Termination (`pkill`)
+Because Condor launches each job with its full runner script path (`<run_dir>/stages/<stage>/<job_id>/job_runner.sh`), you can terminate all running jobs of a pipeline with a single shell command:
+
+```bash
+pkill -f 'condor_runs/latest/stages'
+# or:
+pkill -f '<run_dir>/stages'
+```
+
+### Active PID Tracking (`pipeline/active_pids.txt`)
+Condor maintains real-time tracking of active job PIDs in `<run_dir>/pipeline/active_pids.txt`. PIDs are registered atomically as jobs are submitted to worker slots and removed as jobs finish or fail. Upon clean pipeline completion, this file is empty.
 
 ---
 

@@ -90,7 +90,9 @@ struct StageManifestEntry {
  *     ├── pipeline/
  *     │   ├── pre_hook.log
  *     │   ├── post_hook.log
- *     │   └── pipeline_summary.yaml
+ *     │   ├── pipeline_summary.yaml
+ *     │   ├── kill_jobs.sh
+ *     │   └── active_pids.txt
  *     └── stages/
  *         ├── compile/
  *         │   ├── stage_manifest.txt
@@ -137,16 +139,16 @@ public:
     std::string run_id() const { return run_dir_.filename().string(); }
 
     /**
-     * @brief Gets the filesystem path for the emergency kill script (`<run_dir>/kill_jobs.sh`).
-     * @return Path to `<run_dir>/kill_jobs.sh`.
+     * @brief Gets the filesystem path for the emergency kill script (`<run_dir>/pipeline/kill_jobs.sh`).
+     * @return Path to `<run_dir>/pipeline/kill_jobs.sh`.
      */
-    std::filesystem::path kill_script_path() const { return run_dir_ / "kill_jobs.sh"; }
+    std::filesystem::path kill_script_path() const { return pipeline_dir() / "kill_jobs.sh"; }
 
     /**
-     * @brief Gets the filesystem path for active process IDs file (`<run_dir>/active_pids.txt`).
-     * @return Path to `<run_dir>/active_pids.txt`.
+     * @brief Gets the filesystem path for active process IDs file (`<run_dir>/pipeline/active_pids.txt`).
+     * @return Path to `<run_dir>/pipeline/active_pids.txt`.
      */
-    std::filesystem::path active_pids_path() const { return run_dir_ / "active_pids.txt"; }
+    std::filesystem::path active_pids_path() const { return pipeline_dir() / "active_pids.txt"; }
 
     /**
      * @brief Gets the filesystem path for the pipeline artifacts directory (`<run_dir>/artifacts`).
