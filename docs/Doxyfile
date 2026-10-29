@@ -89,9 +89,7 @@ INPUT                  = docs/index.md \
                          docs/user \
                          docs/dev \
                          include \
-                         src \
-                         server/include \
-                         server/src
+                         src
 INPUT_ENCODING         = UTF-8
 FILE_PATTERNS          = *.c \
                          *.cc \

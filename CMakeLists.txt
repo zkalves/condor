@@ -123,7 +123,7 @@ set(CONDOR_LIB_SOURCES
     src/menu.cpp
     src/scheduler.cpp
     src/html_report.cpp
-    src/remote_client.cpp
+    src/client/remote_client.cpp
 )
 
 add_library(condor_core STATIC ${CONDOR_LIB_SOURCES})
@@ -138,19 +138,19 @@ target_link_libraries(condor_core PUBLIC
     pthread
 )
 
-# Condor Main Executable
-add_executable(condor src/main.cpp)
+# Condor Main Executable (Runner CLI)
+add_executable(condor src/client/main.cpp)
 target_compile_definitions(condor PRIVATE CONDOR_VERSION="${PROJECT_VERSION}")
 target_link_libraries(condor PRIVATE condor_core)
 
 # Condor Hub (Central Reporting & Remote Control Server)
 add_executable(condor-hub
-    server/src/fleet_manager.cpp
-    server/src/server.cpp
-    server/src/main.cpp
+    src/server/fleet_manager.cpp
+    src/server/server.cpp
+    src/server/main.cpp
 )
 target_include_directories(condor-hub PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/server/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server"
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 target_link_libraries(condor-hub PRIVATE

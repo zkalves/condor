@@ -27,7 +27,7 @@
 #include <set>
 #include <nlohmann/json.hpp>
 
-#include "hub/models.hpp"
+#include "models.hpp"
 
 namespace condor::hub {
 

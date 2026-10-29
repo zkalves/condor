@@ -34,8 +34,8 @@ flowchart TD
     SCHED --> REPORT["HtmlReportGenerator\n(src/html_report.cpp)"]
     REPORT --> HTML["artifacts/report.html\n(Zero-Dependency Interactive Report)"]
 
-    SCHED --> REMOTE["RemoteServerClient\n(src/remote_client.cpp)"]
-    REMOTE -.->|WebSocket / HTTP| HUB["Condor Hub (condor-hub)\n(server/src/server.cpp)"]
+    SCHED --> REMOTE["RemoteServerClient\n(src/client/remote_client.cpp)"]
+    REMOTE -.->|WebSocket / HTTP| HUB["Condor Hub (condor-hub)\n(src/server/server.cpp)"]
     HUB --> DASH["Web Dashboard\n(http://localhost:8080/)"]
 ```
 

@@ -27,7 +27,7 @@
 #include <mutex>
 #include <vector>
 
-#include "hub/fleet_manager.hpp"
+#include "fleet_manager.hpp"
 
 namespace condor::hub {
 
