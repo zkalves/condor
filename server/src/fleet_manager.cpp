@@ -20,6 +20,8 @@
 #include "hub/fleet_manager.hpp"
 
 #include <iostream>
+#include <fstream>
+#include <filesystem>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <chrono>
@@ -299,6 +301,51 @@ nlohmann::json FleetManager::get_run_json(const std::string& run_id) const {
         return it->second.to_json();
     }
     return nullptr;
+}
+
+bool FleetManager::save_report(const std::string& run_id, const std::string& html_content, const std::string& artifacts_dir) {
+    if (run_id.empty() || html_content.empty()) return false;
+
+    std::filesystem::path dir = std::filesystem::path(artifacts_dir) / run_id;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        std::cerr << "[CONDOR-HUB] Error creating directory " << dir << ": " << ec.message() << std::endl;
+        return false;
+    }
+
+    std::filesystem::path file_path = dir / "report.html";
+    std::ofstream ofs(file_path, std::ios::binary);
+    if (!ofs) {
+        std::cerr << "[CONDOR-HUB] Error opening file for write: " << file_path << std::endl;
+        return false;
+    }
+    ofs.write(html_content.data(), html_content.size());
+    ofs.close();
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = runs_.find(run_id);
+        if (it != runs_.end()) {
+            it->second.has_report = true;
+            it->second.report_url = "/reports/" + run_id;
+            nlohmann::json notif;
+            notif["type"] = "report_received";
+            notif["run_id"] = run_id;
+            notif["run"] = it->second.to_json();
+            broadcast_to_dashboards(notif);
+        }
+    }
+    return true;
+}
+
+std::string FleetManager::get_report_path(const std::string& run_id, const std::string& artifacts_dir) const {
+    std::filesystem::path file_path = std::filesystem::path(artifacts_dir) / run_id / "report.html";
+    std::error_code ec;
+    if (std::filesystem::exists(file_path, ec)) {
+        return file_path.string();
+    }
+    return "";
 }
 
 void FleetManager::broadcast_to_dashboards(const nlohmann::json& msg) {

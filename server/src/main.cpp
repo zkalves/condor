@@ -39,6 +39,7 @@ int main(int argc, char** argv) {
     app.add_option("-b,--bind,--host", config.host, "Network host address to bind (default: 0.0.0.0)");
     app.add_option("-t,--token", config.token, "Optional Bearer authentication token");
     app.add_option("-w,--workers", config.worker_threads, "Worker threads (default: 2)");
+    app.add_option("-a,--artifacts-dir", config.artifacts_dir, "Directory to store client artifacts and HTML reports (default: ./hub_artifacts)");
 
     CLI11_PARSE(app, argc, argv);
 

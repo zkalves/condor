@@ -1326,8 +1326,19 @@ bool Scheduler::run() {
         pipeline_success = false;
     }
 
-    // Emit final telemetry frame and finished event
+    // Generate tool-agnostic HTML report (includes all stage and job hook logs)
+    std::filesystem::path report_html_path = workspace_.artifacts_dir() / "report.html";
+    HtmlReportGenerator::write_report(report_html_path, config_, workspace_, stages_, jobs_, final_stats, pipeline_success);
+
+    // Emit final telemetry frame, upload report, and send finished event
     if (remote_client_ && remote_client_->is_enabled()) {
+        std::ifstream rfs(report_html_path, std::ios::binary);
+        if (rfs) {
+            std::string report_html((std::istreambuf_iterator<char>(rfs)),
+                                     std::istreambuf_iterator<char>());
+            remote_client_->send_report(report_html);
+        }
+
         nlohmann::json tel;
         tel["status"] = pipeline_success ? "PASSED" : "FAILED";
         tel["progress"] = {
@@ -1353,10 +1364,6 @@ bool Scheduler::run() {
         });
         remote_client_->stop();
     }
-
-    // Generate tool-agnostic HTML report (includes all stage and job hook logs)
-    std::filesystem::path report_html_path = workspace_.artifacts_dir() / "report.html";
-    HtmlReportGenerator::write_report(report_html_path, config_, workspace_, stages_, jobs_, final_stats, pipeline_success);
 
     // Purge successful job logs if enabled to conserve disk space
     if (config_.settings.purge_successful_logs) {

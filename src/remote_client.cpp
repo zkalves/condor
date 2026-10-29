@@ -176,6 +176,23 @@ void RemoteServerClient::send_telemetry(const nlohmann::json& telemetry) {
     outbound_queue_.push(msg.dump());
 }
 
+void RemoteServerClient::send_report(const std::string& html_content) {
+    if (!is_enabled() || html_content.empty()) return;
+
+    nlohmann::json msg;
+    msg["type"] = "report_upload";
+    msg["run_id"] = run_id_;
+    msg["pipeline"] = pipeline_name_;
+    msg["project"] = config_.project;
+    msg["tags"] = config_.tags;
+    msg["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    msg["html"] = html_content;
+
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    outbound_queue_.push(msg.dump());
+}
+
 bool RemoteServerClient::connect_socket() {
     if (socket_fd_ >= 0) {
         close(socket_fd_);

@@ -113,6 +113,23 @@ public:
      */
     nlohmann::json get_run_json(const std::string& run_id) const;
 
+    /**
+     * @brief Saves an uploaded HTML execution report for a run.
+     * @param run_id Identifier of target run.
+     * @param html_content Raw HTML report string.
+     * @param artifacts_dir Base directory configured on server for storing artifacts.
+     * @return True if saved successfully, false otherwise.
+     */
+    bool save_report(const std::string& run_id, const std::string& html_content, const std::string& artifacts_dir);
+
+    /**
+     * @brief Resolves the filesystem path to a stored report for a run if present.
+     * @param run_id Identifier of target run.
+     * @param artifacts_dir Base directory configured on server for storing artifacts.
+     * @return Full path to report.html, or empty string if not found.
+     */
+    std::string get_report_path(const std::string& run_id, const std::string& artifacts_dir) const;
+
 private:
     void broadcast_to_dashboards(const nlohmann::json& msg);
 

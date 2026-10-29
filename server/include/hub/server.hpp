@@ -40,6 +40,7 @@ struct HubConfig {
     int port{8080};
     std::string token;
     int worker_threads{2};
+    std::string artifacts_dir{"./hub_artifacts"};
 };
 
 /**

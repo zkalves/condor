@@ -51,6 +51,7 @@
   - Standalone pure C++20 Linux `epoll` server (`condor-hub`) supporting high-concurrency WebSocket channels (RFC 6455) and REST endpoints with zero external dependencies
   - Real-time pipeline telemetry streaming (DAG stage progression, active jobs, worker PIDs, elapsed runtime, and peak RSS)
   - Embedded dark-mode single-page HTML/CSS/JS dashboard (`http://localhost:8080/`)
+  - Centralized HTML report archive: runners automatically upload interactive `report.html` execution reports on completion, stored under `--artifacts-dir` and viewable directly in browser tabs via `/reports/<run_id>`
   - Bidirectional remote controls: Pause, Resume, Abort Pipeline, Kill Runaway Job, and dynamic concurrency scaling
   - 100% offline-safe guarantee: zero network connections attempted unless explicitly enabled via YAML `server:` or CLI `--server-url`
 
@@ -246,6 +247,7 @@ Syntax: condor-hub [OPTIONS]
 OPTIONS:
   -p, --port <port>           Listening port for HTTP dashboard and WebSocket (default: 8080)
   -H, --host <host>           Host or network interface to bind (default: 0.0.0.0)
+  -a, --artifacts-dir <path>  Directory to store client HTML reports and run artifacts (default: ./hub_artifacts)
   -t, --token <token>         Optional Bearer authentication token
   -w, --workers <N>           Worker thread count for connection handling (default: 4)
   -h, --help                  Print help message and exit
