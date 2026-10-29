@@ -113,14 +113,24 @@ void RemoteServerClient::start() {
 void RemoteServerClient::stop() {
     if (!running_.load()) return;
 
-    // Give outbound queue up to 500ms to flush pending final events
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    // Give outbound queue up to 1000ms to flush pending final events
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
     while (std::chrono::steady_clock::now() < deadline) {
         {
             std::lock_guard<std::mutex> lock(queue_mutex_);
             if (outbound_queue_.empty()) break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    // Brief delay to allow pending TCP buffers to transmit over socket
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Send clean WebSocket Close frame
+    if (socket_fd_ >= 0 && (protocol_ == "ws" || protocol_ == "wss")) {
+        uint8_t close_frame[6] = {0x88, 0x80, 0x12, 0x34, 0x56, 0x78};
+        send(socket_fd_, close_frame, sizeof(close_frame), MSG_NOSIGNAL);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
     running_.store(false);

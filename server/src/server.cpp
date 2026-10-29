@@ -260,49 +260,52 @@ void HubServer::handle_new_connection(int listen_fd, int epoll_fd) {
     }
 }
 
+void HubServer::close_connection(int fd) {
+    if (fd < 0) return;
+    if (epoll_fd_ >= 0) {
+        epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
+    }
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        connections_.erase(fd);
+    }
+    fleet_manager_.remove_client_fd(fd);
+    fleet_manager_.remove_dashboard_socket(fd);
+    close(fd);
+}
+
 void HubServer::handle_socket_read(int fd, int epoll_fd) {
     char buf[4096];
     std::string read_bytes;
+    bool client_closed = false;
 
     while (true) {
         ssize_t n = recv(fd, buf, sizeof(buf), 0);
         if (n > 0) {
             read_bytes.append(buf, n);
         } else if (n == 0) {
-            // Client closed
-            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr);
-            {
-                std::lock_guard<std::mutex> lock(state_mutex_);
-                connections_.erase(fd);
-            }
-            fleet_manager_.remove_client_fd(fd);
-            fleet_manager_.remove_dashboard_socket(fd);
-            close(fd);
-            return;
+            client_closed = true;
+            break;
         } else {
             if (errno == EAGAIN || errno == EWOULDBLOCK) break;
-            // Socket error
-            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr);
-            {
-                std::lock_guard<std::mutex> lock(state_mutex_);
-                connections_.erase(fd);
-            }
-            fleet_manager_.remove_client_fd(fd);
-            fleet_manager_.remove_dashboard_socket(fd);
-            close(fd);
-            return;
+            client_closed = true;
+            break;
         }
     }
 
-    if (read_bytes.empty()) return;
-
     bool is_ws = false;
-    {
+    if (!read_bytes.empty()) {
         std::lock_guard<std::mutex> lock(state_mutex_);
         auto it = connections_.find(fd);
         if (it != connections_.end()) {
             is_ws = it->second.is_websocket;
             it->second.buffer.append(read_bytes);
+        }
+    } else {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        auto it = connections_.find(fd);
+        if (it != connections_.end()) {
+            is_ws = it->second.is_websocket;
         }
     }
 
@@ -310,22 +313,41 @@ void HubServer::handle_socket_read(int fd, int epoll_fd) {
         std::string full_buf;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
-            full_buf = std::move(connections_[fd].buffer);
-            connections_[fd].buffer.clear();
+            auto it = connections_.find(fd);
+            if (it != connections_.end()) {
+                full_buf = std::move(it->second.buffer);
+                it->second.buffer.clear();
+            }
         }
-        handle_websocket_data(fd, reinterpret_cast<const uint8_t*>(full_buf.data()), full_buf.size());
+        if (!full_buf.empty()) {
+            size_t consumed = handle_websocket_data(fd, reinterpret_cast<const uint8_t*>(full_buf.data()), full_buf.size());
+            if (consumed < full_buf.size()) {
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                auto it = connections_.find(fd);
+                if (it != connections_.end()) {
+                    it->second.buffer.append(full_buf.substr(consumed));
+                }
+            }
+        }
     } else {
-        // HTTP Request or Handshake
         std::string raw_req;
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
-            raw_req = connections_[fd].buffer;
+            auto it = connections_.find(fd);
+            if (it != connections_.end()) {
+                raw_req = it->second.buffer;
+            }
         }
+        if (!raw_req.empty()) {
+            size_t header_end = raw_req.find("\r\n\r\n");
+            if (header_end != std::string::npos) {
+                handle_http_request(fd, raw_req);
+            }
+        }
+    }
 
-        size_t header_end = raw_req.find("\r\n\r\n");
-        if (header_end != std::string::npos) {
-            handle_http_request(fd, raw_req);
-        }
+    if (client_closed) {
+        close_connection(fd);
     }
 }
 
@@ -395,7 +417,7 @@ void HubServer::handle_http_request(int fd, const std::string& raw_request) {
              << kDashboardHtml;
         std::string s = resp.str();
         send(fd, s.c_str(), s.size(), MSG_NOSIGNAL);
-        close(fd);
+        close_connection(fd);
         return;
     }
 
@@ -415,7 +437,7 @@ void HubServer::handle_http_request(int fd, const std::string& raw_request) {
              << body;
         std::string s = resp.str();
         send(fd, s.c_str(), s.size(), MSG_NOSIGNAL);
-        close(fd);
+        close_connection(fd);
         return;
     }
 
@@ -440,7 +462,7 @@ void HubServer::handle_http_request(int fd, const std::string& raw_request) {
              << body;
         std::string s = resp.str();
         send(fd, s.c_str(), s.size(), MSG_NOSIGNAL);
-        close(fd);
+        close_connection(fd);
         return;
     }
 
@@ -472,17 +494,17 @@ void HubServer::handle_http_request(int fd, const std::string& raw_request) {
             std::string resp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
             send(fd, resp.c_str(), resp.size(), MSG_NOSIGNAL);
         }
-        close(fd);
+        close_connection(fd);
         return;
     }
 
     // Default 404
     std::string not_found = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
     send(fd, not_found.c_str(), not_found.size(), MSG_NOSIGNAL);
-    close(fd);
+    close_connection(fd);
 }
 
-void HubServer::handle_websocket_data(int fd, const uint8_t* data, size_t len) {
+size_t HubServer::handle_websocket_data(int fd, const uint8_t* data, size_t len) {
     size_t offset = 0;
     while (offset + 2 <= len) {
         uint8_t b0 = data[offset];
@@ -548,16 +570,14 @@ void HubServer::handle_websocket_data(int fd, const uint8_t* data, size_t len) {
                 // Ignore parse errors on malformed frames
             }
         } else if (opcode == 0x8) { // Close frame
-            epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
-            fleet_manager_.remove_client_fd(fd);
-            fleet_manager_.remove_dashboard_socket(fd);
-            close(fd);
-            return;
+            close_connection(fd);
+            return len;
         } else if (opcode == 0x9) { // Ping -> send Pong
             uint8_t pong[2] = {0x8A, 0x00};
             send(fd, pong, 2, MSG_NOSIGNAL);
         }
     }
+    return offset;
 }
 
 } // namespace condor::hub

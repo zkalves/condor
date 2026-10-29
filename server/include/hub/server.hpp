@@ -77,7 +77,8 @@ private:
     void handle_new_connection(int listen_fd, int epoll_fd);
     void handle_socket_read(int fd, int epoll_fd);
     void handle_http_request(int fd, const std::string& raw_request);
-    void handle_websocket_data(int fd, const uint8_t* data, size_t len);
+    size_t handle_websocket_data(int fd, const uint8_t* data, size_t len);
+    void close_connection(int fd);
 
     HubConfig config_;
     FleetManager fleet_manager_;

@@ -86,7 +86,11 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
       text-transform: uppercase;
     }
     .badge-live { background: rgba(34, 197, 94, 0.2); color: var(--success); }
-    .badge-offline { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+    .badge-passed { background: rgba(34, 197, 94, 0.25); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
+    .badge-failed { background: rgba(239, 68, 68, 0.25); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3); }
+    .badge-aborted { background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); }
+    .badge-offline { background: rgba(148, 163, 184, 0.2); color: var(--text-muted); }
+    .badge-disconnected { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(252, 165, 165, 0.2); }
     .pulse-dot {
       width: 8px;
       height: 8px;
@@ -369,7 +373,7 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
           const msg = JSON.parse(event.data);
           if (msg.type === 'fleet_update') {
             updateRuns(msg.runs);
-          } else if (msg.type === 'telemetry' || msg.type === 'event') {
+          } else if (msg.type === 'telemetry' || msg.type === 'event' || msg.type === 'client_registered' || msg.type === 'client_disconnected') {
             fetchRuns();
           }
         } catch (e) {
@@ -431,17 +435,21 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
       container.innerHTML = runs.map(run => {
         const prog = run.progress || {};
         const total = prog.total_jobs || 1;
-        const passedPct = ((prog.passed_jobs || 0) / total) * 100;
-        const runningPct = ((prog.running_jobs || 0) / total) * 100;
-        const failedPct = ((prog.failed_jobs || 0) / total) * 100;
-        const skippedPct = ((prog.skipped_jobs || 0) / total) * 100;
+        const passedPct = Math.min(100, ((prog.passed_jobs || 0) / total) * 100);
+        const runningPct = Math.min(100, ((prog.running_jobs || 0) / total) * 100);
+        const failedPct = Math.min(100, ((prog.failed_jobs || 0) / total) * 100);
+        const skippedPct = Math.min(100, ((prog.skipped_jobs || 0) / total) * 100);
 
         const isPaused = run.status === 'PAUSED';
         const isRunning = run.status === 'RUNNING';
 
         let statusClass = 'badge-offline';
         if (run.status === 'RUNNING') statusClass = 'badge-live';
-        if (run.status === 'PAUSED') statusClass = 'badge';
+        else if (run.status === 'PAUSED') statusClass = 'badge-aborted';
+        else if (run.status === 'PASSED') statusClass = 'badge-passed';
+        else if (run.status === 'FAILED') statusClass = 'badge-failed';
+        else if (run.status === 'ABORTED') statusClass = 'badge-aborted';
+        else if (run.status === 'DISCONNECTED') statusClass = 'badge-disconnected';
 
         const activeJobsHtml = (run.active_jobs && run.active_jobs.length > 0)
           ? run.active_jobs.map(j => `
@@ -477,7 +485,7 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
               <div class="run-actions">
                 ${isRunning ? `<button class="btn btn-warning" onclick="sendControl('${run.run_id}', 'pause')">⏸️ Pause</button>` : ''}
                 ${isPaused ? `<button class="btn btn-primary" onclick="sendControl('${run.run_id}', 'resume')">▶️ Resume</button>` : ''}
-                <button class="btn btn-danger" onclick="sendControl('${run.run_id}', 'abort')">🛑 Abort</button>
+                ${(isRunning || isPaused) ? `<button class="btn btn-danger" onclick="sendControl('${run.run_id}', 'abort')">🛑 Abort</button>` : ''}
               </div>
             </div>
 
