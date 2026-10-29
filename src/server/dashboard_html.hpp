@@ -613,9 +613,10 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
           <th onclick="handleSort('status')" id="th-status">Status <span class="sort-icon">⇅</span></th>
           <th onclick="handleSort('pipeline')" id="th-pipeline">Pipeline / Project <span class="sort-icon">⇅</span></th>
           <th onclick="handleSort('run_id')" id="th-run_id">Run ID <span class="sort-icon">⇅</span></th>
+          <th onclick="handleSort('start_time')" id="th-start_time">Start Time <span class="sort-icon">⇅</span></th>
+          <th onclick="handleSort('elapsed')" id="th-elapsed">Elapsed <span class="sort-icon">⇅</span></th>
           <th onclick="handleSort('progress')" id="th-progress">Progress <span class="sort-icon">⇅</span></th>
           <th onclick="handleSort('active_jobs')" id="th-active_jobs">Active Workers <span class="sort-icon">⇅</span></th>
-          <th onclick="handleSort('elapsed')" id="th-elapsed">Elapsed <span class="sort-icon">⇅</span></th>
           <th onclick="handleSort('peak_rss')" id="th-peak_rss">Peak RSS <span class="sort-icon">⇅</span></th>
           <th>Report</th>
           <th style="text-align: right;">Actions</th>
@@ -623,7 +624,7 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
       </thead>
       <tbody id="runs-table-body">
         <tr>
-          <td colspan="9" class="empty-state">No pipeline runs registered yet. Launch Condor with <code>--server-url ws://&lt;host&gt;:8080/api/v1/ws</code></td>
+          <td colspan="10" class="empty-state">No pipeline runs registered yet. Launch Condor with <code>--server-url ws://&lt;host&gt;:8080/api/v1/ws</code></td>
         </tr>
       </tbody>
     </table>
@@ -638,11 +639,33 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
     let ws = null;
     let allRuns = [];
     let currentView = localStorage.getItem('condor_hub_view') || 'table';
-    let sortField = 'elapsed';
+    let sortField = 'start_time';
     let sortAsc = false;
     let searchQuery = '';
     let statusFilter = 'ALL';
     let expandedRows = new Set();
+
+    function parseRunIdTime(runId) {
+      if (!runId || runId.length < 15 || runId[8] !== '_') return 0;
+      const y = parseInt(runId.substring(0, 4), 10);
+      const m = parseInt(runId.substring(4, 6), 10) - 1;
+      const d = parseInt(runId.substring(6, 8), 10);
+      const hh = parseInt(runId.substring(9, 11), 10);
+      const mm = parseInt(runId.substring(11, 13), 10);
+      const ss = parseInt(runId.substring(13, 15), 10);
+      return new Date(y, m, d, hh, mm, ss).getTime();
+    }
+
+    function formatStartTime(ms, str, runId) {
+      if (str && str.length > 0) return str;
+      let timeMs = (ms && ms > 0) ? ms : parseRunIdTime(runId);
+      if (timeMs > 0) {
+        const d = new Date(timeMs);
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      }
+      return '-';
+    }
 
     function connectWebSocket() {
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -771,6 +794,9 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
         } else if (sortField === 'status') {
           valA = a.status || '';
           valB = b.status || '';
+        } else if (sortField === 'start_time') {
+          valA = a.start_time_ms || parseRunIdTime(a.run_id);
+          valB = b.start_time_ms || parseRunIdTime(b.run_id);
         } else if (sortField === 'progress') {
           valA = a.progress?.percent || 0;
           valB = b.progress?.percent || 0;
@@ -801,7 +827,7 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
       document.getElementById('runs-count').textContent = runs.length;
 
       // Update sort header icons
-      ['status', 'pipeline', 'run_id', 'progress', 'active_jobs', 'elapsed', 'peak_rss'].forEach(f => {
+      ['status', 'pipeline', 'run_id', 'start_time', 'elapsed', 'progress', 'active_jobs', 'peak_rss'].forEach(f => {
         const th = document.getElementById(`th-${f}`);
         if (!th) return;
         const isCurrent = (sortField === f);
@@ -834,7 +860,7 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
     function renderTable(runs) {
       const tbody = document.getElementById('runs-table-body');
       if (!runs || runs.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${allRuns.length === 0 ? 'No pipeline runs registered yet. Launch Condor with <code>--server-url ws://&lt;host&gt;:8080/api/v1/ws</code>' : 'No pipeline runs match the active filter.'}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="empty-state">${allRuns.length === 0 ? 'No pipeline runs registered yet. Launch Condor with <code>--server-url ws://&lt;host&gt;:8080/api/v1/ws</code>' : 'No pipeline runs match the active filter.'}</td></tr>`;
         return;
       }
 
@@ -868,6 +894,12 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
             </td>
             <td><span class="run-id-mono" title="${run.run_id}">${run.run_id}</span></td>
             <td>
+              <div style="font-family: monospace; font-size: 12px; white-space: nowrap;" title="Start Time">
+                ${formatStartTime(run.start_time_ms, run.start_time, run.run_id)}
+              </div>
+            </td>
+            <td><strong>${formatTime(prog.elapsed_sec || 0)}</strong></td>
+            <td>
               <div class="mini-progress-wrap">
                 <div class="mini-progress-bar">
                   <div class="prog-passed" style="width: ${passedPct}%"></div>
@@ -888,7 +920,6 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
                 </button>
               ` : `<span style="color: var(--text-muted); font-size: 12px;">Idle</span>`}
             </td>
-            <td><strong>${formatTime(prog.elapsed_sec || 0)}</strong></td>
             <td>${run.peak_rss_mb > 0 ? `<span>${run.peak_rss_mb.toFixed(1)} MB</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
             <td>
               ${run.has_report ? `
@@ -918,7 +949,7 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
 
           html += `
             <tr class="details-row">
-              <td colspan="9">
+              <td colspan="10">
                 <div class="details-box">
                   <div class="details-title">
                     <span>Active Worker Processes (${run.active_jobs.length})</span>
@@ -980,6 +1011,7 @@ inline constexpr std::string_view kDashboardHtml = R"rawhtml(<!DOCTYPE html>
                 <div class="run-meta">
                   <span>Project: <strong>${escapeHtml(run.project || 'default')}</strong></span>
                   <span>Status: ${getStatusBadge(run.status)}</span>
+                  <span>Started: <strong>${formatStartTime(run.start_time_ms, run.start_time, run.run_id)}</strong></span>
                   <span>Elapsed: <strong>${formatTime(prog.elapsed_sec || 0)}</strong></span>
                   ${run.peak_rss_mb > 0 ? `<span>Peak RSS: <strong>${run.peak_rss_mb.toFixed(1)} MB</strong></span>` : ''}
                 </div>

@@ -114,6 +114,16 @@ struct RunRecord {
             ? (static_cast<double>(passed_jobs + failed_jobs + skipped_jobs) / total_jobs * 100.0)
             : 0.0;
 
+        std::string start_time_str;
+        if (start_time_ms > 0) {
+            std::time_t t = static_cast<std::time_t>(start_time_ms / 1000);
+            std::tm tm_buf{};
+            localtime_r(&t, &tm_buf);
+            char buf[64];
+            std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm_buf);
+            start_time_str = buf;
+        }
+
         return {
             {"run_id", run_id},
             {"pipeline", pipeline},
@@ -133,6 +143,7 @@ struct RunRecord {
                 {"elapsed_sec", elapsed_sec}
             }},
             {"peak_rss_mb", peak_rss_mb},
+            {"start_time", start_time_str},
             {"start_time_ms", start_time_ms},
             {"last_seen_ms", last_seen_ms},
             {"is_connected", client_socket_fd >= 0},

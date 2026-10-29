@@ -33,6 +33,20 @@ static int64_t now_ms() {
         std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+static int64_t parse_run_id_epoch_ms(const std::string& run_id) {
+    if (run_id.size() >= 15 && run_id[8] == '_') {
+        std::tm tm{};
+        std::string s = run_id.substr(0, 15);
+        if (strptime(s.c_str(), "%Y%m%d_%H%M%S", &tm)) {
+            time_t t = mktime(&tm);
+            if (t != static_cast<time_t>(-1)) {
+                return static_cast<int64_t>(t) * 1000;
+            }
+        }
+    }
+    return 0;
+}
+
 static bool send_ws_text_frame(int fd, const std::string& text) {
     if (fd < 0) return false;
 
@@ -77,7 +91,10 @@ void FleetManager::register_client(const std::string& run_id,
         run.status = "CONNECTED";
     }
     run.last_seen_ms = now_ms();
-    if (run.start_time_ms == 0) run.start_time_ms = run.last_seen_ms;
+    if (run.start_time_ms == 0) {
+        int64_t parsed = parse_run_id_epoch_ms(run_id);
+        run.start_time_ms = (parsed > 0) ? parsed : run.last_seen_ms;
+    }
 
     if (client_fd >= 0) {
         fd_to_run_id_[client_fd] = run_id;
@@ -95,6 +112,10 @@ void FleetManager::update_telemetry(const std::string& run_id, const nlohmann::j
     auto& run = runs_[run_id];
     run.run_id = run_id;
     run.last_seen_ms = now_ms();
+    if (run.start_time_ms == 0) {
+        int64_t parsed = parse_run_id_epoch_ms(run_id);
+        run.start_time_ms = (parsed > 0) ? parsed : run.last_seen_ms;
+    }
     if (client_fd >= 0) {
         run.client_socket_fd = client_fd;
         fd_to_run_id_[client_fd] = run_id;
@@ -141,6 +162,10 @@ void FleetManager::record_event(const std::string& run_id, const std::string& ev
     auto it = runs_.find(run_id);
     if (it != runs_.end()) {
         it->second.last_seen_ms = now_ms();
+        if (it->second.start_time_ms == 0) {
+            int64_t parsed = parse_run_id_epoch_ms(run_id);
+            it->second.start_time_ms = (parsed > 0) ? parsed : it->second.last_seen_ms;
+        }
         if (event_type == "pipeline_started") {
             it->second.status = "RUNNING";
             it->second.total_jobs = payload.value("total_jobs", it->second.total_jobs);
