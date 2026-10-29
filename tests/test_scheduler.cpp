@@ -580,3 +580,29 @@ stages:
 
     std::filesystem::remove_all(test_dir, ec);
 }
+
+TEST_CASE(scheduler_terminal_guard) {
+    // Verify RAII guard behavior when disabled
+    {
+        TerminalModeGuard guard(false);
+        ASSERT_FALSE(RuntimeMenu::is_raw_mode_active());
+    }
+
+    // Move construction and assignment
+    {
+        TerminalModeGuard guard1(false);
+        TerminalModeGuard guard2 = std::move(guard1);
+        TerminalModeGuard guard3(false);
+        guard3 = std::move(guard2);
+        ASSERT_FALSE(RuntimeMenu::is_raw_mode_active());
+    }
+
+    // poll_stdin_for_menu should be safe and non-blocking in test environment
+    RuntimeMenu::clear_menu_request();
+    RuntimeMenu::poll_stdin_for_menu();
+    ASSERT_FALSE(RuntimeMenu::is_menu_requested());
+
+    // disable_raw_mode should be idempotent
+    RuntimeMenu::disable_raw_mode();
+    ASSERT_FALSE(RuntimeMenu::is_raw_mode_active());
+}

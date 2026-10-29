@@ -52,6 +52,8 @@ void ProgressDisplay::set_paused(bool paused) {
             last_lines_rendered_ = 0;
         }
         std::cout << "\033[?25h" << std::flush; // Show cursor
+    } else if (!paused_ && interactive_) {
+        std::cout << "\033[?25l" << std::flush; // Hide cursor during active HUD
     }
 }
 
@@ -317,6 +319,9 @@ void ProgressDisplay::print_final_summary(const ProgressStats& stats, bool succe
         std::cout << "HTML Report:  " << html_report_path << "\n";
     }
     std::cout << div << "\n" << std::endl;
+    if (interactive_) {
+        std::cout << "\033[?25h" << std::flush;
+    }
 }
 
 } // namespace condor

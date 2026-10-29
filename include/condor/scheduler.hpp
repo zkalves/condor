@@ -164,6 +164,12 @@ public:
     size_t current_slots() const { return max_slots_; }
 
     /**
+     * @brief Checks if the scheduler execution has been aborted.
+     * @return True if aborted, false otherwise.
+     */
+    bool is_aborted() const { return aborted_; }
+
+    /**
      * @brief Immediately aborts all running jobs and halts scheduling of new jobs.
      */
     void abort_all();
