@@ -185,7 +185,7 @@ add_test(NAME AllCondorTests COMMAND condor_tests)
 # ==============================================================================
 include(GNUInstallDirs)
 
-install(TARGETS condor
+install(TARGETS condor condor-hub
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 

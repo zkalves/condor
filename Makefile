@@ -16,6 +16,12 @@ JOBS         ?= $(shell nproc 2>/dev/null || echo 4)
 OUTPUT_MODE  ?= all
 CONDOR_BIN   := $(BUILD_DIR)/condor
 TEST_BIN     := $(BUILD_DIR)/condor_tests
+HUB_BIN      := $(BUILD_DIR)/condor-hub
+
+HUB_PORT     ?= 8080
+HUB_HOST     ?= 0.0.0.0
+HUB_TOKEN    ?=
+HUB_WORKERS  ?= 4
 
 PREFIX       ?= /usr/local
 DESTDIR      ?=
@@ -24,6 +30,7 @@ DESTDIR      ?=
 .DEFAULT_GOAL := help
 
 .PHONY: help all build build-offline build-custom download-deps vendor-deps test test-verbose \
+        build-server build-hub run-server run-hub server hub run-remote \
         dry-run run-simple run-conditional run-coverage run-ci \
         run-verilator run-verilator-coverage \
         docs docs-doxygen docs-serve clean-docs \
@@ -49,6 +56,11 @@ help: ## Show this help message with all available targets
 	@echo "Test Flows:"
 	@echo "  test                 Run test suite via CTest"
 	@echo "  test-verbose         Run tests directly with full individual test output"
+	@echo ""
+	@echo "Server / Hub Flows:"
+	@echo "  build-server         Build Condor Hub server (condor-hub, alias: build-hub)"
+	@echo "  run-server           Start Condor Hub server (http://0.0.0.0:8080, aliases: server, run-hub, hub)"
+	@echo "  run-remote           Run example pipeline connected to Condor Hub (ws://127.0.0.1:8080/api/v1/ws)"
 	@echo ""
 	@echo "Documentation Flows:"
 	@echo "  docs                 Generate HTML documentation portal"
@@ -85,6 +97,10 @@ help: ## Show this help message with all available targets
 	@echo "  BUILD_TYPE           CMake build type: Release, Debug, RelWithDebInfo (current: $(BUILD_TYPE))"
 	@echo "  JOBS                 Parallel compilation jobs (current: $(JOBS))"
 	@echo "  OUTPUT_MODE          Terminal output mode: all, failures, summary (current: $(OUTPUT_MODE))"
+	@echo "  HUB_PORT             Condor Hub listening port (current: $(HUB_PORT))"
+	@echo "  HUB_HOST             Condor Hub bind address (current: $(HUB_HOST))"
+	@echo "  HUB_TOKEN            Condor Hub authentication token (optional)"
+	@echo "  HUB_WORKERS          Condor Hub worker thread count (current: $(HUB_WORKERS))"
 	@echo "========================================================================"
 
 # ------------------------------------------------------------------------------
@@ -136,6 +152,9 @@ $(CONDOR_BIN):
 $(TEST_BIN):
 	@$(MAKE) build
 
+$(HUB_BIN):
+	@$(MAKE) build
+
 # ------------------------------------------------------------------------------
 # Test Flows
 # ------------------------------------------------------------------------------
@@ -146,6 +165,23 @@ test: $(TEST_BIN) ## Run test suite via CTest
 test-verbose: $(TEST_BIN) ## Run tests directly with full individual test output
 	@echo "==> Running Condor test binary directly..."
 	@$(TEST_BIN)
+
+# ------------------------------------------------------------------------------
+# Server / Hub Flows
+# ------------------------------------------------------------------------------
+build-server build-hub: ## Build Condor Hub server executable
+	@echo "==> Building Condor Hub server..."
+	@cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+	@cmake --build $(BUILD_DIR) --target condor-hub -j$(JOBS)
+	@echo "==> Server build complete: $(HUB_BIN)"
+
+run-server run-hub server hub: $(HUB_BIN) ## Start Condor Hub reporting and remote control server
+	@echo "==> Starting Condor Hub on $(HUB_HOST):$(HUB_PORT)..."
+	@$(HUB_BIN) --host $(HUB_HOST) --port $(HUB_PORT) --workers $(HUB_WORKERS) $(if $(HUB_TOKEN),--token $(HUB_TOKEN),)
+
+run-remote: $(CONDOR_BIN) ## Run example pipeline reporting to Condor Hub
+	@echo "==> Executing examples/simple/scripts/pipeline.yaml connected to Condor Hub..."
+	@$(CONDOR_BIN) examples/simple/scripts/pipeline.yaml --server-url ws://127.0.0.1:$(HUB_PORT)/api/v1/ws $(if $(HUB_TOKEN),--server-token $(HUB_TOKEN),)
 
 # ------------------------------------------------------------------------------
 # Pipeline Execution Flows
@@ -226,7 +262,7 @@ docs-serve: ## Serve documentation portal locally on http://127.0.0.1:8000
 # ------------------------------------------------------------------------------
 # Installation & Packaging Flows
 # ------------------------------------------------------------------------------
-install: $(CONDOR_BIN) ## Install condor binary, examples, and documentation to PREFIX
+install: $(CONDOR_BIN) $(HUB_BIN) ## Install condor binaries, examples, and documentation to PREFIX
 	@echo "==> Installing Condor to $(DESTDIR)$(PREFIX)..."
 	@DESTDIR="$(DESTDIR)" cmake --install $(BUILD_DIR) --prefix "$(PREFIX)"
 
@@ -238,7 +274,7 @@ uninstall: ## Uninstall files installed by previous make install
 		rm -rf "$(DESTDIR)$(PREFIX)/share/doc/condor" 2>/dev/null || true; \
 		echo "==> Uninstall complete."; \
 	else \
-		rm -f "$(DESTDIR)$(PREFIX)/bin/condor"; \
+		rm -f "$(DESTDIR)$(PREFIX)/bin/condor" "$(DESTDIR)$(PREFIX)/bin/condor-hub"; \
 		rm -rf "$(DESTDIR)$(PREFIX)/share/condor" 2>/dev/null || true; \
 		rm -rf "$(DESTDIR)$(PREFIX)/share/doc/condor" 2>/dev/null || true; \
 		echo "==> Removed binary and share directories."; \
