@@ -29,6 +29,7 @@
 
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/eventfd.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -128,6 +129,14 @@ bool HubServer::start() {
         return false;
     }
 
+    wakeup_fd_ = eventfd(0, EFD_NONBLOCK);
+    if (wakeup_fd_ >= 0) {
+        struct epoll_event ev_wake;
+        ev_wake.events = EPOLLIN;
+        ev_wake.data.fd = wakeup_fd_;
+        epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, wakeup_fd_, &ev_wake);
+    }
+
     running_.store(true);
     worker_thread_ = std::thread(&HubServer::event_loop, this);
 
@@ -147,6 +156,11 @@ void HubServer::stop() {
 
     running_.store(false);
 
+    if (wakeup_fd_ >= 0) {
+        uint64_t val = 1;
+        write(wakeup_fd_, &val, sizeof(val));
+    }
+
     if (listen_fd_ >= 0) {
         close(listen_fd_);
         listen_fd_ = -1;
@@ -154,6 +168,11 @@ void HubServer::stop() {
 
     if (worker_thread_.joinable()) {
         worker_thread_.join();
+    }
+
+    if (wakeup_fd_ >= 0) {
+        close(wakeup_fd_);
+        wakeup_fd_ = -1;
     }
 
     if (epoll_fd_ >= 0) {
@@ -188,6 +207,13 @@ void HubServer::event_loop() {
         for (int i = 0; i < nfds; ++i) {
             int fd = events[i].data.fd;
             uint32_t evs = events[i].events;
+
+            if (fd == wakeup_fd_) {
+                uint64_t val = 0;
+                read(wakeup_fd_, &val, sizeof(val));
+                if (!running_.load()) break;
+                continue;
+            }
 
             if (fd == listen_fd_) {
                 handle_new_connection(listen_fd_, epoll_fd_);
