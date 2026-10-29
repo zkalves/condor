@@ -129,6 +129,10 @@
           "type": "boolean",
           "description": "Purge raw stdout/stderr logs of passed jobs upon completion"
         },
+        "owner": {
+          "type": "string",
+          "description": "Owner or author of the pipeline execution"
+        },
         "server": {
           "type": "object",
           "description": "Central reporting and remote control server settings",
@@ -137,6 +141,7 @@
             "url": { "type": "string" },
             "token": { "type": "string" },
             "project": { "type": "string" },
+            "owner": { "type": "string" },
             "tags": {
               "type": "array",
               "items": { "type": "string" }

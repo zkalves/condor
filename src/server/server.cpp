@@ -388,8 +388,9 @@ void HubServer::handle_http_request(int fd, const std::string& raw_request) {
             } else {
                 std::string run_id = get_header_value(raw_request, "X-Condor-Run-Id");
                 std::string pipeline = get_header_value(raw_request, "X-Condor-Pipeline");
+                std::string owner = get_header_value(raw_request, "X-Condor-Owner");
                 if (!run_id.empty()) {
-                    fleet_manager_.register_client(run_id, pipeline, "default", {}, fd);
+                    fleet_manager_.register_client(run_id, pipeline, "default", owner.empty() ? "anonymous" : owner, {}, fd);
                 }
             }
             return;
@@ -627,8 +628,9 @@ size_t HubServer::handle_websocket_data(int fd, const uint8_t* data, size_t len)
                     std::string run_id = j.value("run_id", "");
                     std::string pipe = j.value("pipeline", "");
                     std::string proj = j.value("project", "default");
+                    std::string owner = j.value("owner", "anonymous");
                     std::vector<std::string> tags = j.value("tags", std::vector<std::string>{});
-                    fleet_manager_.register_client(run_id, pipe, proj, tags, fd);
+                    fleet_manager_.register_client(run_id, pipe, proj, owner, tags, fd);
                 } else if (type == "telemetry") {
                     std::string run_id = j.value("run_id", "");
                     if (j.contains("data") && j["data"].is_object()) {

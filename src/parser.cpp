@@ -713,6 +713,9 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
         if (s["purge_successful_logs"]) {
             config.settings.purge_successful_logs = s["purge_successful_logs"].as<bool>();
         }
+        if (s["owner"]) {
+            config.settings.owner = s["owner"].as<std::string>();
+        }
         if (s["server"] && s["server"].IsMap()) {
             const auto& srv = s["server"];
             if (srv["enabled"]) config.settings.server.enabled = srv["enabled"].as<bool>();
@@ -722,6 +725,7 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
             }
             if (srv["token"]) config.settings.server.token = srv["token"].as<std::string>();
             if (srv["project"]) config.settings.server.project = srv["project"].as<std::string>();
+            if (srv["owner"]) config.settings.server.owner = srv["owner"].as<std::string>();
             if (srv["tags"] && srv["tags"].IsSequence()) {
                 for (const auto& tag_node : srv["tags"]) {
                     config.settings.server.tags.push_back(tag_node.as<std::string>());
@@ -731,6 +735,9 @@ PipelineConfig YamlParser::parse_string(std::string_view yaml_content, const std
                 config.settings.server.poll_interval_ms = srv["poll_interval_ms"].as<int>();
                 if (config.settings.server.poll_interval_ms < 50) config.settings.server.poll_interval_ms = 50;
             }
+        }
+        if (config.settings.server.owner.empty() && !config.settings.owner.empty()) {
+            config.settings.server.owner = config.settings.owner;
         }
     }
 

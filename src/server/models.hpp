@@ -78,6 +78,7 @@ struct RunRecord {
     std::string run_id;
     std::string pipeline;
     std::string project;
+    std::string owner{"anonymous"};
     std::vector<std::string> tags;
     std::string status{"UNKNOWN"}; // RUNNING, PAUSED, PASSED, FAILED, ABORTED, DISCONNECTED
     int total_jobs{0};
@@ -85,6 +86,8 @@ struct RunRecord {
     int running_jobs{0};
     int passed_jobs{0};
     int failed_jobs{0};
+    int waiting_jobs{0};
+    int other_jobs{0};
     int skipped_jobs{0};
     double elapsed_sec{0.0};
     double peak_rss_mb{0.0};
@@ -111,8 +114,16 @@ struct RunRecord {
         }
 
         double percent = (total_jobs > 0)
-            ? (static_cast<double>(passed_jobs + failed_jobs + skipped_jobs) / total_jobs * 100.0)
+            ? (static_cast<double>(passed_jobs + failed_jobs + skipped_jobs + other_jobs) / total_jobs * 100.0)
             : 0.0;
+
+        int waiting = waiting_jobs;
+        if (waiting == 0 && (status == "RUNNING" || status == "PAUSED")) {
+            int accounted = passed_jobs + failed_jobs + running_jobs + skipped_jobs + other_jobs;
+            if (total_jobs > accounted) {
+                waiting = total_jobs - accounted;
+            }
+        }
 
         std::string start_time_str;
         if (start_time_ms > 0) {
@@ -127,17 +138,29 @@ struct RunRecord {
         return {
             {"run_id", run_id},
             {"pipeline", pipeline},
+            {"name", pipeline},
             {"project", project},
+            {"owner", owner.empty() ? "anonymous" : owner},
             {"tags", tags},
             {"status", status},
             {"has_report", has_report},
             {"report_url", report_url},
+            {"total_runs", total_jobs},
+            {"total_jobs", total_jobs},
+            {"passed", passed_jobs},
+            {"failed", failed_jobs},
+            {"running", running_jobs},
+            {"waiting", waiting},
+            {"other", other_jobs},
+            {"skipped", skipped_jobs},
             {"progress", {
                 {"total_jobs", total_jobs},
-                {"completed_jobs", passed_jobs + failed_jobs + skipped_jobs},
+                {"completed_jobs", passed_jobs + failed_jobs + skipped_jobs + other_jobs},
                 {"running_jobs", running_jobs},
+                {"waiting_jobs", waiting},
                 {"passed_jobs", passed_jobs},
                 {"failed_jobs", failed_jobs},
+                {"other_jobs", other_jobs},
                 {"skipped_jobs", skipped_jobs},
                 {"percent", percent},
                 {"elapsed_sec", elapsed_sec}
